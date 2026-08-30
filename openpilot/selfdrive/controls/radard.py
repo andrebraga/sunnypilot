@@ -205,7 +205,6 @@ class RadarD:
     self.CP_SP = CP_SP
 
     self.current_time = 0.0
-
     self.tracks: dict[int, Track] = {}
     self.kalman_params = KalmanParams(DT_MDL)
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, DT_MDL) for _ in range(2)]
@@ -221,7 +220,6 @@ class RadarD:
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
-    self.current_time = 1e-9*max(sm.logMonoTime.values())
 
     if sm.recv_frame['carState'] != self.last_v_ego_frame:
       self.v_ego = sm['carState'].vEgo
@@ -299,7 +297,7 @@ def main() -> None:
   cloudlog.info("radard got CarParamsSP")
 
   # *** setup messaging
-  sm = messaging.SubMaster(['modelV2', 'carState', 'liveTracks'], poll='modelV2')
+  sm = messaging.SubMaster(['modelV2', 'carState', 'radarTracks'], poll='modelV2')
   pm = messaging.PubMaster(['radarState'])
 
   RD = RadarD(CP, CP_SP, CP.radarDelay)
@@ -307,7 +305,7 @@ def main() -> None:
   while 1:
     sm.update()
 
-    RD.update(sm, sm['liveTracks'])
+    RD.update(sm, sm['radarTracks'])
     RD.publish(pm)
 
 
