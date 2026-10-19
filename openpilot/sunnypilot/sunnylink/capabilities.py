@@ -46,6 +46,7 @@ CAPABILITY_FIELDS = (
   "hyundai_alpha_long_available",
   "toyota_tss2",
   "custom_model_active",
+  "toyota_enhanced_bsm_available",
 )
 
 CAPABILITY_LABELS: dict[str, str] = {
@@ -70,6 +71,7 @@ CAPABILITY_LABELS: dict[str, str] = {
   "hyundai_alpha_long_available": "Hyundai Alpha Longitudinal available",
   "toyota_tss2": "Toyota TSS2 platform",
   "custom_model_active": "Non-Default model selected",
+  "toyota_enhanced_bsm_available": "Toyota Enhanced BSM available",
 }
 
 # Fields read from the car (CarParams*, CarPlatformBundle). Until a car is seen these stay at
@@ -89,6 +91,7 @@ CAR_CAPABILITY_FIELDS = (
   "subaru_has_sng",
   "hyundai_alpha_long_available",
   "toyota_tss2",
+  "toyota_enhanced_bsm_available",
 )
 
 # Explicit defaults for non-boolean capability fields
@@ -138,12 +141,14 @@ def _resolve_brand_capabilities(caps: dict, bundle_platform: str, CP) -> None:
   elif brand == "toyota":
     if bundle_platform:
       try:
-        caps["toyota_tss2"] = bool(TOYOTA_CAR[bundle_platform].config.flags & ToyotaFlags.TSS2)
+        flags = TOYOTA_CAR[bundle_platform].config.flags
+        caps["toyota_tss2"] = bool(flags & ToyotaFlags.TSS2)
+        caps["toyota_enhanced_bsm_available"] = bool(flags & ToyotaFlags.TSS2) and not bool(flags & ToyotaFlags.SECOC)
       except KeyError:
         cloudlog.exception(f"capabilities: unknown toyota platform {bundle_platform!r}")
     elif CP is not None:
       caps["toyota_tss2"] = bool(CP.flags & ToyotaFlags.TSS2)
-
+      caps["toyota_enhanced_bsm_available"] = bool(CP.flags & ToyotaFlags.TSS2) and not bool(CP.flags & ToyotaFlags.SECOC)
 
 def generate_capabilities(params: Params | None = None) -> dict:
   """Generate a SettingsCapabilities dict from CarParams + boolean params.

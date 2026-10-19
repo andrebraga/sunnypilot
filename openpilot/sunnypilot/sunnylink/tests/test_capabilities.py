@@ -70,6 +70,9 @@ class TestOpaquePerBrandFlags(OpenpilotTestCase):
   def test_hyundai_alpha_long_available_field_present(self):
     assert "hyundai_alpha_long_available" in CAPABILITY_FIELDS
 
+  def test_toyota_enhanced_bsm_available_field_present(self):
+    assert "toyota_enhanced_bsm_available" in CAPABILITY_FIELDS
+
   def test_subaru_has_sng_default_false(self, caps):
     assert caps["subaru_has_sng"] is False
 
@@ -81,6 +84,8 @@ class TestOpaquePerBrandFlags(OpenpilotTestCase):
 
   def test_toyota_tss2_default_false(self, caps):
     assert caps["toyota_tss2"] is False
+  def test_toyota_enhanced_bsm_available_default_false(self, caps):
+    assert caps["toyota_enhanced_bsm_available"] is False
 
 
 class TestCapabilitiesShape(OpenpilotTestCase):
