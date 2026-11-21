@@ -127,7 +127,7 @@ class ModelRenderer(Widget, ModelRendererSP):
     model = sm['modelV2']
     radar_state = sm['radarState'] if sm.valid['radarState'] else None
     lead_one = radar_state.leadOne if radar_state else None
-    render_lead_indicator = ui_state.draw_radar_tracks and ui_state.radar_tracks != 0 and radar_state is not None
+    render_lead_indicator = self._longitudinal_control and radar_state is not None
 
     # Update model data when needed
     model_updated = sm.updated['modelV2']
