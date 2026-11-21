@@ -77,7 +77,7 @@ class UIState(UIStateSP):
         "vehicleParameters",
         "testJoystick",
         "rawAudioData",
-        "liveTracks",
+        "radarTracks",
       ] + self.sm_services_ext
     )
 

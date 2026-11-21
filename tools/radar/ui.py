@@ -60,7 +60,7 @@ DARWIN_FFMPEG_LIBRARY_NAMES = {
   "libswscale.so.8": "libswscale.8.dylib",
 }
 REMOTE_SERVICES = (
-  "can", "carParams", "carState", "liveCalibration", "liveTracks", "modelV2", "radarState",
+  "can", "carParams", "carState", "extrinsicsCalibration", "radarTracks", "modelV2", "radarState",
   "roadCameraState", "wideRoadCameraState", "roadEncodeData", "wideRoadEncodeData",
 )
 ACTIVE_REMOTE_RELAYS: list[subprocess.Popen] = []
@@ -1235,7 +1235,7 @@ def get_dbc_track_details(
 
 
 def match_decoded_track_values(tracks, decoded_tracks, decoded_values: dict):
-  """Match liveTracks points to the independent CAN decoder for side-by-side comparison."""
+  """Match radarTracks points to the independent CAN decoder for side-by-side comparison."""
   matched = {}
   for track in tracks:
     best_track = None
@@ -2420,7 +2420,7 @@ def draw_source_status(font, rect: rl.Rectangle, live_tracks, valid: bool, alive
     source_text = f"{hidden_source_count} inactive source{'s' if hidden_source_count != 1 else ''} hidden"
   elif not source_active:
     source_text = "no route loaded"
-  elif data_source == "liveTracks":
+  elif data_source == "radarTracks":
     source_text = "no source metadata"
   elif valid and live_tracks.radarTracksAvailable:
     source_text = "radar detected / parsing"
@@ -2438,7 +2438,7 @@ def draw_source_status(font, rect: rl.Rectangle, live_tracks, valid: bool, alive
   table_label = {"motion": "MOTION", "kinematics": "KIN", "object": "OBJ", "signals": "SIGNALS"}[table_mode]
   chip_specs = [
     ("OPEN", GREEN, "route", "Open a route or live-car IP, or paste one with Cmd/Ctrl+V"),
-    (source_title, CYAN, "source", "Switch CAN / liveTracks source"),
+    (source_title, CYAN, "source", "Switch CAN / radarTracks source"),
     ("LABELS ON" if show_labels else "LABELS", GREEN if show_labels else MUTED, "labels", "Show / hide all labels"),
   ]
   if remote_address is not None:
@@ -2512,8 +2512,8 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
   sm = messaging.SubMaster([
     "carParams",
     "carState",
-    "liveCalibration",
-    "liveTracks",
+    "extrinsicsCalibration",
+    "radarTracks",
     "modelV2",
     "radarState",
     "roadCameraState",
@@ -2790,7 +2790,7 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
         route_fingerprint = message_fingerprint
     route_message_times = [
       sm.logMonoTime[service]
-      for service in ("carState", "modelV2", "roadCameraState", "liveTracks")
+      for service in ("carState", "modelV2", "roadCameraState", "radarTracks")
       if sm.updated[service] and sm.logMonoTime[service] > 0
     ]
     if replay_process is not None and route_message_times:
@@ -2802,7 +2802,7 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
       )
     if (route_loading
         and time.monotonic() - route_loading_started > 0.15
-        and any(sm.updated[service] for service in ("carState", "modelV2", "roadCameraState", "liveTracks"))):
+        and any(sm.updated[service] for service in ("carState", "modelV2", "roadCameraState", "radarTracks"))):
       route_loading = False
     while True:
       try:
@@ -2823,9 +2823,9 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
           route_fingerprint = replay_timeline.car_fingerprint
       except queue.Empty:
         break
-    if sm.updated["liveTracks"]:
-      live_tracks = make_radar_snapshot(sm["liveTracks"])
-      live_data_seen = sm.valid["liveTracks"]
+    if sm.updated["radarTracks"]:
+      live_tracks = make_radar_snapshot(sm["radarTracks"])
+      live_data_seen = sm.valid["radarTracks"]
 
     window_width = rl.get_screen_width()
     window_height = rl.get_screen_height()
@@ -2846,12 +2846,12 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
     status_height = 88 + max(0, len(visible_status_sources) - 1) * 30
     status_rect = rl.Rectangle(0, 0, left_width, min(status_height, camera_height))
 
-    if sm.valid["roadCameraState"] and sm.valid["liveCalibration"] and camera_view.frame:
+    if sm.valid["roadCameraState"] and sm.valid["extrinsicsCalibration"] and camera_view.frame:
       camera_key = ("tici", str(sm["roadCameraState"].sensor))
       device_camera = DEVICE_CAMERAS.get(camera_key)
       is_wide_camera = camera_view.stream_type == VisionStreamType.VISION_STREAM_WIDE_ROAD
-      rpy_calib = np.asarray(sm["liveCalibration"].rpyCalib)
-      wide_from_device_euler = np.asarray(sm["liveCalibration"].wideFromDeviceEuler)
+      rpy_calib = np.asarray(sm["extrinsicsCalibration"].rpyCalib)
+      wide_from_device_euler = np.asarray(sm["extrinsicsCalibration"].wideFromDeviceEuler)
       next_calibration_key = (
         camera_key, camera_view.stream_type, camera_view.frame.width, camera_view.frame.height,
         *rpy_calib, *wide_from_device_euler,
@@ -2886,13 +2886,13 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
     else:
       selected_tracks = live_tracks
       data_valid = live_data_seen
-      data_alive = sm.alive["liveTracks"]
+      data_alive = sm.alive["radarTracks"]
       tracks = list(selected_tracks.points) if data_valid else []
       raw_signals = ()
       motion_states = match_decoded_track_values(tracks, decoded_tracks, decoded_motion_states)
       track_signals = match_decoded_track_values(tracks, decoded_tracks, decoded_track_signals)
       track_locations = match_decoded_track_values(tracks, decoded_tracks, decoded_track_locations)
-      data_source = "liveTracks"
+      data_source = "radarTracks"
 
     source_filter_values = [
       source_filter_state(source_filters, radar_source_key(source))
@@ -2940,10 +2940,10 @@ def ui_thread(addr: str, start_wide: bool = False, start_fused: bool = False, st
       fused_device_camera = None
       rpy_calib = np.zeros(3)
       wide_from_device_euler = np.zeros(3)
-      if sm.valid["roadCameraState"] and sm.valid["liveCalibration"]:
+      if sm.valid["roadCameraState"] and sm.valid["extrinsicsCalibration"]:
         fused_device_camera = DEVICE_CAMERAS.get(("tici", str(sm["roadCameraState"].sensor)))
-        rpy_calib = np.asarray(sm["liveCalibration"].rpyCalib)
-        wide_from_device_euler = np.asarray(sm["liveCalibration"].wideFromDeviceEuler)
+        rpy_calib = np.asarray(sm["extrinsicsCalibration"].rpyCalib)
+        wide_from_device_euler = np.asarray(sm["extrinsicsCalibration"].wideFromDeviceEuler)
       previous_selected_track_id = selected_track_id
       selected_track_id = draw_fused_camera_mode(
         font, road_camera_view, wide_camera_view, fused_device_camera, rpy_calib, wide_from_device_euler,

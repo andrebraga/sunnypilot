@@ -200,11 +200,11 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
   def _update_state(self):
     super()._update_state()
 
-    if ui_state.sm.updated["liveTracks"]:
+    if ui_state.sm.updated["radarTracks"]:
       self._radar_tracks_status.update(
-        ui_state.sm["liveTracks"], ui_state.sm.valid["liveTracks"], ui_state.radar_tracks, ui_state.sm["carState"].vEgo,
+        ui_state.sm["radarTracks"], ui_state.sm.valid["radarTracks"], ui_state.radar_tracks, ui_state.sm["carState"].vEgo,
       )
-    elif not ui_state.sm.alive["liveTracks"]:
+    elif not ui_state.sm.alive["radarTracks"]:
       self._radar_tracks_status.reset()
 
     # update offroad label

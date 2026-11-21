@@ -154,11 +154,11 @@ class ModelRenderer(Widget, ModelRendererSP):
     else:
       self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
 
-    if ui_state.draw_radar_tracks and sm.valid['liveTracks'] and sm.recv_frame['liveTracks'] >= ui_state.started_frame:
-      if (sm.updated['liveTracks'] or sm.updated['liveCalibration'] or transform_updated or
+    if ui_state.draw_radar_tracks and sm.valid['radarTracks'] and sm.recv_frame['radarTracks'] >= ui_state.started_frame:
+      if (sm.updated['radarTracks'] or sm.updated['extrinsicsCalibration'] or transform_updated or
           not self.radar_tracks.projection_initialized):
         self.radar_tracks.update_radar_tracks(
-          sm['liveTracks'], self._map_to_screen, self._path_offset_z,
+          sm['radarTracks'], self._map_to_screen, self._path_offset_z,
         )
       highlighted_tracks = radar_lead_track_colors(radar_state) if render_lead_indicator else {}
       matched_positions = self.radar_tracks.draw_cached_radar_tracks(
