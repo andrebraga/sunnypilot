@@ -36,9 +36,12 @@ class TogglesLayoutMici(NavScroller):
     enable_openpilot = BigParamControl("enable sunnypilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback,
                                        description="Enable to use sunnypilot driver assistance.\n" +
                                                    "Disable to use your car's stock driver assistance.")
-
+    radar_tracks = BigMultiParamToggle("radar tracks", "RadarTracks", ["off", "lead only", "full radar"])
+    draw_radar_tracks = BigParamControl("draw radar tracks", "DrawRadarTracks")
 
     self._scroller.add_widgets([
+      radar_tracks,
+      draw_radar_tracks,
       self._personality_toggle,
       self._initial_cruise_speed,
       is_metric_toggle,
@@ -51,6 +54,8 @@ class TogglesLayoutMici(NavScroller):
 
     # Toggle lists
     self._refresh_toggles = (
+      ("RadarTracks", radar_tracks),
+      ("DrawRadarTracks", draw_radar_tracks),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),

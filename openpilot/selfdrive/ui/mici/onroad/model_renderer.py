@@ -15,6 +15,7 @@ from openpilot.system.ui.lib.shader_polygon import draw_polygon, Gradient
 from openpilot.system.ui.widgets import Widget
 
 from openpilot.selfdrive.ui.sunnypilot.mici.onroad.model_renderer import LANE_LINE_COLORS_SP, ModelRendererSP
+from openpilot.selfdrive.ui.sunnypilot.onroad.radar_tracks import draw_radar_lead_connectors, radar_lead_track_colors
 
 CLIP_MARGIN = 500
 MIN_DRAW_DISTANCE = 10.0
@@ -49,6 +50,10 @@ class LeadVehicle:
     self.d_filter = FirstOrderFilter(0.0, 0.2, 1 / gui_app.target_fps, initialized=False)
     self.y_filter = FirstOrderFilter(0.0, 0.2, 1 / gui_app.target_fps, initialized=False)
     self.fade_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
+    # radar track association, used to draw connectors to the matching radar track
+    self.position: tuple[float, float] | None = None
+    self.radar_track_id = -1
+    self.radar = False
 
 
 class ModelRenderer(Widget, ModelRendererSP):
@@ -122,11 +127,12 @@ class ModelRenderer(Widget, ModelRendererSP):
     model = sm['modelV2']
     radar_state = sm['radarState'] if sm.valid['radarState'] else None
     lead_one = radar_state.leadOne if radar_state else None
-    render_lead_indicator = self._longitudinal_control and radar_state is not None
+    render_lead_indicator = ui_state.draw_radar_tracks and ui_state.radar_tracks != 0 and radar_state is not None
 
     # Update model data when needed
     model_updated = sm.updated['modelV2']
-    if model_updated or sm.updated['radarState'] or self._transform_dirty:
+    transform_updated = self._transform_dirty
+    if model_updated or sm.updated['radarState'] or transform_updated:
       if model_updated:
         self._update_raw_points(model)
 
@@ -145,9 +151,30 @@ class ModelRenderer(Widget, ModelRendererSP):
 
     if render_lead_indicator:
       self._update_leads(sm)
-      self._draw_lead_indicator()
     else:
       self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
+
+    if ui_state.draw_radar_tracks and sm.valid['liveTracks'] and sm.recv_frame['liveTracks'] >= ui_state.started_frame:
+      if (sm.updated['liveTracks'] or sm.updated['liveCalibration'] or transform_updated or
+          not self.radar_tracks.projection_initialized):
+        self.radar_tracks.update_radar_tracks(
+          sm['liveTracks'], self._map_to_screen, self._path_offset_z,
+        )
+      highlighted_tracks = radar_lead_track_colors(radar_state) if render_lead_indicator else {}
+      matched_positions = self.radar_tracks.draw_cached_radar_tracks(
+        screen_offset=(self._rect.x, self._rect.y),
+        highlighted_tracks=highlighted_tracks,
+      )
+      if render_lead_indicator:
+        draw_radar_lead_connectors(
+          self._lead_vehicles, matched_positions, highlighted_tracks,
+          screen_offset=(self._rect.x, self._rect.y),
+        )
+    else:
+      self.radar_tracks.clear_projection()
+
+    if render_lead_indicator:
+      self._draw_lead_indicator()
 
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
@@ -166,28 +193,35 @@ class ModelRenderer(Widget, ModelRendererSP):
   def _update_leads(self, sm):
     plan = sm['longitudinalPlan']
     if plan.longitudinalPlanSource == log.LongitudinalPlan.LongitudinalPlanSource.e2e and len(sm['modelV2'].leadsV3) > 1:
-      leads = [(lead.prob > 0.5, lead.x[0], -lead.y[0]) for lead in list(sm['modelV2'].leadsV3)[:2]]
+      leads = [(lead.prob > 0.5, lead.x[0], -lead.y[0], False, -1) for lead in list(sm['modelV2'].leadsV3)[:2]]
     else:
       radar = sm['radarState']
-      leads = [(lead.present, lead.dRel + RADAR_TO_CAMERA, lead.yRel) for lead in (radar.leadOne, radar.leadTwo)]
+      leads = [(lead.present, lead.dRel + RADAR_TO_CAMERA, lead.yRel, lead.radar, int(lead.radarTrackId))
+               for lead in (radar.leadOne, radar.leadTwo)]
 
     # both leads can be the same vehicle
     if leads[0][0] and abs(leads[1][1] - leads[0][1]) < 3.0:
-      leads[1] = (False, 0.0, 0.0)
+      leads[1] = (False, 0.0, 0.0, False, -1)
 
     ss, cs = sm['selfdriveState'], sm['carState']
     # braking disengages without making openpilot unavailable
     available = ss.enabled or ss.engageable or cs.brakePressed
     lane = self._path.raw_points
     opacity = 0.4 if ui_state.status == UIStatus.DISENGAGED else 0.8
-    for lead, (present, d_rel, y_rel) in zip(self._lead_vehicles, leads, strict=True):
+    for lead, (present, d_rel, y_rel, radar_lead, track_id) in zip(self._lead_vehicles, leads, strict=True):
       visible = available and present and d_rel < MAX_DRAW_DISTANCE and len(lane) > 0
       # snap to a new vehicle instead of sliding over
       if not visible or abs(y_rel - lead.y_filter.x) > 3.0:
         lead.d_filter.initialized = lead.y_filter.initialized = False
       lead.fade_filter.update(opacity if visible else 0.0)
+      lead.radar = visible and radar_lead
+      lead.radar_track_id = track_id
+      lead.position = None
       if visible:
         lead.bar = self._get_lead_bar(lane, lead.d_filter.update(d_rel), lead.y_filter.update(y_rel))
+        # far edge of the bar, where the lead vehicle sits
+        far_edge = lead.bar[[0, 3]].mean(axis=0)
+        lead.position = (float(far_edge[0]), float(far_edge[1]))
 
   def _get_lead_bar(self, lane, d_rel, y_rel):
     # bar on the road behind the lead, following the lane

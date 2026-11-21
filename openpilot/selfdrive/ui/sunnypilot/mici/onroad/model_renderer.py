@@ -8,6 +8,7 @@ import pyray as rl
 from openpilot.selfdrive.ui.ui_state import UIStatus
 from openpilot.selfdrive.ui.sunnypilot.onroad.blendful import BlendfulRenderer
 from openpilot.selfdrive.ui.sunnypilot.onroad.rainbow_path import RainbowPath
+from openpilot.selfdrive.ui.sunnypilot.onroad.radar_tracks import RadarTracks
 
 LANE_LINE_COLORS_SP = {
   UIStatus.LAT_ONLY: rl.Color(0, 255, 64, 255),
@@ -19,3 +20,4 @@ class ModelRendererSP:
   def __init__(self):
     self.rainbow_path = RainbowPath()
     self.blendful = BlendfulRenderer(rect_relative=True)
+    self.radar_tracks = RadarTracks()

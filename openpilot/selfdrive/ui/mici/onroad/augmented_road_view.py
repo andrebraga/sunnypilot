@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.navigation import NavigationPanel, PANEL_WIDTH
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
+from openpilot.selfdrive.ui.sunnypilot.onroad.radar_tracks import RadarTracksStatus
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets import Widget
@@ -158,10 +159,12 @@ class BookmarkIcon(Widget):
 
 
 class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
-  def __init__(self, bookmark_callback=None, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_NARROW_ROAD):
+  def __init__(self, bookmark_callback=None, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_NARROW_ROAD,
+               radar_tracks_settings_callback=None):
     super().__init__("camerad", stream_type)
     AugmentedRoadViewSP.__init__(self)
     self._bookmark_callback = bookmark_callback
+    self._radar_tracks_status = RadarTracksStatus(radar_tracks_settings_callback)
     self._set_placeholder_color(rl.BLACK)
 
     self.device_camera: DeviceCameraConfig | None = None
@@ -197,6 +200,13 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
   def _update_state(self):
     super()._update_state()
 
+    if ui_state.sm.updated["liveTracks"]:
+      self._radar_tracks_status.update(
+        ui_state.sm["liveTracks"], ui_state.sm.valid["liveTracks"], ui_state.radar_tracks, ui_state.sm["carState"].vEgo,
+      )
+    elif not ui_state.sm.alive["liveTracks"]:
+      self._radar_tracks_status.reset()
+
     # update offroad label
     if ui_state.panda_type == log.PandaState.PandaType.unknown:
       self._offroad_label.set_text("system booting")
@@ -206,6 +216,9 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
       self._offroad_label.set_text("start the car to\nuse sunnypilot")
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
+    if self._radar_tracks_status.handle_mouse(mouse_pos):
+      return
+
     # Don't trigger click callback if bookmark was triggered
     if not self._bookmark_icon.interacting():
       super()._handle_mouse_release(mouse_pos)
@@ -250,6 +263,8 @@ class AugmentedRoadView(CameraView, AugmentedRoadViewSP):
 
     # Fade out bottom of overlays for looks
     rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
+
+    self._radar_tracks_status.render(self._content_rect)
 
     # Hide DMoji when disengaged unless AlwaysOnDM is enabled
     should_draw_dmoji = (not self._hud_renderer.drawing_top_icons() and
