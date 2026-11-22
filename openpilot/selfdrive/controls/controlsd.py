@@ -134,6 +134,7 @@ class Controls(ControlsExt):
       self.LoC.reset()
 
     # accel PID loop
+    self.LoC.soft_stop = self.limo_mode and not long_plan.hasLead
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, self.CP_SP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     actuators.accel = float(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits))
 

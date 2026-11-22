@@ -38,12 +38,16 @@ class TogglesLayoutMici(NavScroller):
                                                    "Disable to use your car's stock driver assistance.")
     radar_tracks = BigMultiParamToggle("radar tracks", "RadarTracks", ["off", "lead only", "full radar"])
     draw_radar_tracks = BigParamControl("draw radar tracks", "DrawRadarTracks")
+    self._limo_mode = BigParamControl("limo mode", "LimoMode",
+                                      description="Eases acceleration and braking in and out, and slows down early for curves and speed limits ahead.\n" +
+                                                  "Hard braking is never smoothed.")
 
     self._scroller.add_widgets([
       radar_tracks,
       draw_radar_tracks,
       self._personality_toggle,
       self._initial_cruise_speed,
+      self._limo_mode,
       is_metric_toggle,
       ldw_toggle,
       always_on_dm_toggle,
@@ -56,6 +60,7 @@ class TogglesLayoutMici(NavScroller):
     self._refresh_toggles = (
       ("RadarTracks", radar_tracks),
       ("DrawRadarTracks", draw_radar_tracks),
+      ("LimoMode", self._limo_mode),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),
@@ -97,6 +102,7 @@ class TogglesLayoutMici(NavScroller):
 
     if ui_state.CP is not None:
       self._personality_toggle.set_visible(ui_state.has_longitudinal_control)
+      self._limo_mode.set_visible(ui_state.has_longitudinal_control)
 
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:

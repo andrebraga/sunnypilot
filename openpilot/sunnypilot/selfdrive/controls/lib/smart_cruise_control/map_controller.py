@@ -71,9 +71,11 @@ class SmartCruiseControlMap:
   a_ego: float = 0.
   output_v_target: float = V_CRUISE_UNSET
   output_a_target: float = 0.
+  target_distance: float = 0.
 
   def __init__(self):
     self.params = Params()
+    self.limo = None
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
     self.long_enabled = False
@@ -145,6 +147,11 @@ class SmartCruiseControlMap:
 
       d = forward_distances[i]
 
+      if self.limo is not None and self.limo.enabled:
+        if d < self.limo.approach_distance(tv) + tv * TARGET_OFFSET:
+          valid_velocities.append((float(tv), tlat, tlon))
+        continue
+
       a_diff = (self.a_ego - TARGET_ACCEL)
       accel_t = abs(a_diff / TARGET_JERK)
       min_accel_v = calculate_velocity(accel_t, TARGET_JERK, self.a_ego, self.v_ego)
@@ -192,7 +199,8 @@ class SmartCruiseControlMap:
         tlat = target_velocity["latitude"]
         tlon = target_velocity["longitude"]
         tv = target_velocity["velocity"]
-        if tv > self.v_ego:
+        # don't drop the target when its speed is reached before its place is
+        if tv > self.v_ego and not (self.limo is not None and self.limo.enabled):
           continue
 
         if tlat == self.target_lat and tlon == self.target_lon and tv == self.v_target:
@@ -206,6 +214,13 @@ class SmartCruiseControlMap:
     self.v_target = min_v
     self.target_lat = target_lat
     self.target_lon = target_lon
+
+  def update_target_distance(self) -> None:
+    self.target_distance = 0.
+    if self.target_lat != 0 or self.target_lon != 0:
+      d = distance_to_point(self.last_position.latitude * TO_RADIANS, self.last_position.longitude * TO_RADIANS,
+                            self.target_lat * TO_RADIANS, self.target_lon * TO_RADIANS)
+      self.target_distance = max(d - self.v_target * TARGET_OFFSET, 0.)
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, TURNING
@@ -256,6 +271,7 @@ class SmartCruiseControlMap:
 
     self.update_params()
     self.update_calculations(sm)
+    self.update_target_distance()
 
     self.is_enabled, self.is_active = self._update_state_machine()
 

@@ -35,6 +35,7 @@ class SpeedLimitResolver:
 
   def __init__(self):
     self.params = Params()
+    self.limo = None
     self.frame = -1
 
     self._gps_location_service = get_gps_location_service(self.params)
@@ -146,6 +147,8 @@ class SpeedLimitResolver:
     if 0. < next_speed_limit < self.v_ego:
       adapt_time = (next_speed_limit - self.v_ego) / LIMIT_ADAPT_ACC
       adapt_distance = self.v_ego * adapt_time + 0.5 * LIMIT_ADAPT_ACC * adapt_time ** 2
+      if self.limo is not None and self.limo.enabled:
+        adapt_distance = self.limo.approach_distance(next_speed_limit)
 
       if distance_to_speed_limit_ahead <= adapt_distance:
         self.limit_solutions[SpeedLimitSource.map] = next_speed_limit

@@ -12,6 +12,7 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
+from openpilot.sunnypilot.selfdrive.controls.lib.limo_mode import LimoMode
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
@@ -33,6 +34,9 @@ class LongitudinalPlannerSP:
     self.e2e_alerts_helper = E2EAlertsHelper()
     self.accel_boost_sp = AccelBoostSP()
     self.openpilot_longitudinal = CP.openpilotLongitudinalControl
+    self.limo = LimoMode(CP)
+    self.scc.map.limo = self.limo
+    self.resolver.limo = self.limo
 
     self.output_v_target = 0.
     self.output_a_target = 0.
@@ -67,9 +71,20 @@ class LongitudinalPlannerSP:
     self.output_v_target, self.output_a_target = targets[self.source]
     return self.output_v_target, self.output_a_target
 
+  @property
+  def target_distance(self) -> float:
+    """Distance to where the target speed applies, 0 when it's unknown"""
+    if self.source == LongitudinalPlanSource.sccMap:
+      return self.scc.map.target_distance
+    if self.source == LongitudinalPlanSource.speedLimitAssist:
+      return self.resolver.distance
+    return 0.
+
   def update(self, sm: messaging.SubMaster) -> None:
     if self.accel_boost_sp.update_params():
       self.accel_boost = self.accel_boost_sp if self.accel_boost_sp.enabled and self.openpilot_longitudinal else AccelBoost()
+
+    self.limo.update_params()
 
     self.events_sp.clear()
     self.e2e_alerts_helper.update(sm, self.events_sp)

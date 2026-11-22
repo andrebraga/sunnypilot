@@ -634,6 +634,19 @@
               ]
             },
             {
+              "key": "LimoMode",
+              "widget": "toggle",
+              "title": "Limo Mode (Alpha)",
+              "description": "Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. Starts slowing down early for map curves and speed limits ahead. Driving Personality sets how gradual it is. Hard braking is never smoothed.",
+              "enablement": [
+                {
+                  "type": "capability",
+                  "field": "has_longitudinal_control",
+                  "equals": true
+                }
+              ]
+            },
+            {
               "key": "IntelligentCruiseButtonManagement",
               "widget": "toggle",
               "title": "Intelligent Cruise Button Management (ICBM) (Alpha)",

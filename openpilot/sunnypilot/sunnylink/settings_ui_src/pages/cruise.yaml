@@ -36,6 +36,12 @@ sections:
     description: "Adds a small push on top of sunnypilot's own acceleration, stronger in Aggressive and gentler in Relaxed. Eases off in curves and when sunnypilot slows or stops. Never goes past your set speed, and lead-car following still comes first."
     enablement:
     - $ref: '#/macros/longitudinal'
+  - key: LimoMode
+    widget: toggle
+    title: Limo Mode (Alpha)
+    description: "Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. Starts slowing down early for map curves and speed limits ahead. Driving Personality sets how gradual it is. Hard braking is never smoothed."
+    enablement:
+    - $ref: '#/macros/longitudinal'
   - key: IntelligentCruiseButtonManagement
     widget: toggle
     title: Intelligent Cruise Button Management (ICBM) (Alpha)

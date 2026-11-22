@@ -71,6 +71,16 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       self.output_a_target = np.clip(sm['carState'].aEgo, ACCEL_MIN, ACCEL_MAX)
       self.a_cruise = self.output_a_target
 
+    limo_active = self.limo.enabled and not reset_state
+    if not limo_active:
+      # switching it on and off continues from the last target
+      if self.limo.active:
+        self.a_cruise = self.output_a_target
+      self.limo.reset(float(self.output_a_target))
+    self.limo.start_frame(v_ego, float(np.clip(sm['carState'].aEgo, ACCEL_MIN, ACCEL_MAX)), sm['selfdriveState'].personality, limo_active)
+    if limo_active:
+      self.output_a_target = self.limo.a_plan
+
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
 
@@ -109,7 +119,23 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.a_cruise = get_cruise_accel(v_cruise, v_ego, self.a_cruise, self.dt)
     cruise_should_stop = should_stop(v_ego, self.a_cruise)
 
+    if limo_active:
+      # boost needs to know what cruise wants, not how far the smoothing got
+      self.a_cruise = self.limo.cruise_target(v_cruise, self.source, self.target_distance)
+      cruise_should_stop = should_stop(v_ego, self.a_cruise)
+
     output_a_target_e2e = self.accel_boost.update(sm, output_a_target_e2e, output_a_target_mpc, self.a_cruise)
+    a_lead, a_model = output_a_target_mpc, output_a_target_e2e
+
+    if limo_active:
+      self.a_cruise = self.limo.cruise_accel(self.a_cruise, min(a_lead, a_model))
+      output_a_target_mpc = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
+                                                action_t=action_t + self.limo.lookahead)
+      model_v, model_a = sm['modelV2'].velocity.x, sm['modelV2'].acceleration.x
+      if len(model_v) == len(model_a) == len(ModelConstants.T_IDXS):
+        a_now, a_ahead = (get_accel_from_plan(model_v, model_a, ModelConstants.T_IDXS, action_t=t)
+                          for t in (action_t, action_t + self.limo.lookahead))
+        output_a_target_e2e = self.limo.model_accel(output_a_target_e2e, a_now, a_ahead)
 
     candidates = [(output_a_target_mpc, self.mpc.source, output_should_stop_mpc),
                   (self.a_cruise, LongitudinalPlanSource.cruise, cruise_should_stop),
@@ -117,8 +143,16 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
     output_a_target, self.mpc.source, _ = min(candidates, key=lambda c: c[0])
     self.output_should_stop = any(should_stop for _, _, should_stop in candidates)
+    if limo_active:
+      lead = sm['radarState'].leadOne
+      lead_present = lead.present or sm['radarState'].leadTwo.present
+      output_a_target = self.limo.update(output_a_target, self.a_cruise, a_lead if lead_present else None, a_model,
+                                         lead.dRel if lead.present else np.inf, self.fcw)
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
+    if limo_active:
+      self.limo.update_plan(self.a_cruise, a_lead, a_model)
+      a_prev = self.limo.output_last
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
 
   def publish(self, sm, pm):
