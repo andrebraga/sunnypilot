@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import math
 import pyray as rl
 from opendbc.car.hyundai.radar_interface import RADAR_235_248, RADAR_3A5_3C4
-from openpilot.system.ui.lib.application import FontWeight
+from openpilot.system.ui.lib.application import FontWeight, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets.label import UnifiedLabel
 
 NEUTRAL_COLOR = (255, 255, 255)
@@ -161,8 +161,8 @@ class RadarTracksStatus:
         font_size=26,
         font_weight=FontWeight.SEMI_BOLD,
         text_color=color,
-        alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT,
-        alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_TOP,
+        alignment=TextAlignment.RIGHT,
+        alignment_vertical=TextAlignmentVertical.TOP,
         wrap_text=False,
       )
 

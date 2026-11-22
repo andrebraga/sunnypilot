@@ -160,7 +160,8 @@ class ModelRenderer(Widget, ModelRendererSP):
         self.radar_tracks.update_radar_tracks(
           sm['radarTracks'], self._map_to_screen, self._path_offset_z,
         )
-      highlighted_tracks = radar_lead_track_colors(radar_state) if render_lead_indicator else {}
+      # the ring follows the radar settings, unlike the lead bar it doesn't need longitudinal control
+      highlighted_tracks = radar_lead_track_colors(radar_state) if ui_state.radar_tracks != 0 else {}
       matched_positions = self.radar_tracks.draw_cached_radar_tracks(
         screen_offset=(self._rect.x, self._rect.y),
         highlighted_tracks=highlighted_tracks,
@@ -382,6 +383,22 @@ class ModelRenderer(Widget, ModelRendererSP):
       return 0
     indices = np.where(pos_x_array <= path_height)[0]
     return indices[-1] if indices.size > 0 else 0
+
+  def _map_to_screen(self, in_x, in_y, in_z):
+    """Project a point in car space to screen space"""
+    input_pt = np.array([in_x, in_y, in_z])
+    pt = self._car_space_transform @ input_pt
+
+    if abs(pt[2]) < 1e-6:
+      return None
+
+    x, y = pt[0] / pt[2], pt[1] / pt[2]
+
+    clip = self._clip_region
+    if not (clip.x <= x <= clip.x + clip.width and clip.y <= y <= clip.y + clip.height):
+      return None
+
+    return (x, y)
 
   def _map_line_to_polygon(self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, allow_invert: bool = True) -> np.ndarray:
     """Convert 3D line to 2D polygon for rendering."""
