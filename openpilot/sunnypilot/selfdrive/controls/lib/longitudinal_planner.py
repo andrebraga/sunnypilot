@@ -12,6 +12,7 @@ from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
+from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import TARGET_ACCEL as MAP_TARGET_ACCEL
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
@@ -19,6 +20,11 @@ from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
+
+# These start slowing down at a distance that assumes this decel, so the planner has to be allowed to use it
+SOURCE_ACCEL_MIN = {
+  LongitudinalPlanSource.sccMap: MAP_TARGET_ACCEL,
+}
 
 
 class LongitudinalPlannerSP:
@@ -66,6 +72,10 @@ class LongitudinalPlannerSP:
     self.source = min(targets, key=lambda k: targets[k][0])
     self.output_v_target, self.output_a_target = targets[self.source]
     return self.output_v_target, self.output_a_target
+
+  @property
+  def a_target_min(self) -> float:
+    return SOURCE_ACCEL_MIN.get(self.source, 0.)
 
   def update(self, sm: messaging.SubMaster) -> None:
     if self.accel_boost_sp.update_params():
