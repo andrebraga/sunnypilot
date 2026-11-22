@@ -14,6 +14,7 @@ from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
 from openpilot.sunnypilot.selfdrive.controls.lib.e2e_alerts_helper import E2EAlertsHelper
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import TARGET_ACCEL as MAP_TARGET_ACCEL
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.smart_cruise_control import SmartCruiseControl
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_ADAPT_ACC
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_assist import SpeedLimitAssist
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver
 from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
@@ -24,6 +25,7 @@ LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 # These start slowing down at a distance that assumes this decel, so the planner has to be allowed to use it
 SOURCE_ACCEL_MIN = {
   LongitudinalPlanSource.sccMap: MAP_TARGET_ACCEL,
+  LongitudinalPlanSource.speedLimitAssist: LIMIT_ADAPT_ACC,
 }
 
 

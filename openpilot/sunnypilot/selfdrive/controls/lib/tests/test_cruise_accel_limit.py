@@ -17,6 +17,7 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, get_cruise_accel
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP, LongitudinalPlanSource
 from openpilot.sunnypilot.selfdrive.controls.lib.smart_cruise_control.map_controller import R, TARGET_ACCEL, SmartCruiseControlMap
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_ADAPT_ACC
 
 
 def to_degrees(distance):
@@ -33,6 +34,7 @@ class TestCruiseAccelLimit(OpenpilotTestCase):
     (LongitudinalPlanSource.cruise, A_CRUISE_MIN),
     (LongitudinalPlanSource.sccVision, A_CRUISE_MIN),
     (LongitudinalPlanSource.sccMap, TARGET_ACCEL),
+    (LongitudinalPlanSource.speedLimitAssist, LIMIT_ADAPT_ACC),
   ])
   def test_source_limit(self, source, accel_min):
     assert self.get_accel_min(source) == accel_min
