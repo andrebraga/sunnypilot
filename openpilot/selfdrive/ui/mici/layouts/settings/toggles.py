@@ -36,11 +36,14 @@ class TogglesLayoutMici(NavScroller):
     enable_openpilot = BigParamControl("enable sunnypilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback,
                                        description="Enable to use sunnypilot driver assistance.\n" +
                                                    "Disable to use your car's stock driver assistance.")
-
+    self._limo_mode = BigParamControl("limo mode", "LimoMode",
+                                      description="Eases acceleration and braking in and out, and slows down earlier for map curves.\n" +
+                                                  "Firm braking isn't smoothed.")
 
     self._scroller.add_widgets([
       self._personality_toggle,
       self._initial_cruise_speed,
+      self._limo_mode,
       is_metric_toggle,
       ldw_toggle,
       always_on_dm_toggle,
@@ -51,6 +54,7 @@ class TogglesLayoutMici(NavScroller):
 
     # Toggle lists
     self._refresh_toggles = (
+      ("LimoMode", self._limo_mode),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),
@@ -92,6 +96,7 @@ class TogglesLayoutMici(NavScroller):
 
     if ui_state.CP is not None:
       self._personality_toggle.set_visible(ui_state.has_longitudinal_control)
+      self._limo_mode.set_visible(ui_state.has_longitudinal_control)
 
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:

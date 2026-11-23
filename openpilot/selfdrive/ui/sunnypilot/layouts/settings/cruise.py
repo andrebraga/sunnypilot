@@ -6,6 +6,7 @@ See the LICENSE.md file in the root directory for more details.
 """
 from enum import IntEnum
 
+from openpilot.selfdrive.ui.sunnypilot.layouts.settings.cruise_sub_layouts.limo_curve_settings import LimoCurveSettingsLayout
 from openpilot.selfdrive.ui.sunnypilot.layouts.settings.cruise_sub_layouts.speed_limit_settings import SpeedLimitSettingsLayout
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -17,6 +18,7 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 class PanelType(IntEnum):
   CRUISE = 0
   SLA = 1
+  LIMO = 2
 
 
 ICBM_DESC = tr_noop("When enabled, sunnypilot will attempt to manage the built-in cruise control buttons " +
@@ -36,6 +38,7 @@ class CruiseLayout(Widget):
     super().__init__()
     self._current_panel = PanelType.CRUISE
     self._speed_limit_layout = SpeedLimitSettingsLayout(lambda: self._set_current_panel(PanelType.CRUISE))
+    self._limo_curve_layout = LimoCurveSettingsLayout(lambda: self._set_current_panel(PanelType.CRUISE))
 
     items = self._initialize_items()
     self._scroller = Scroller(items, line_separator=True, spacing=0)
@@ -62,6 +65,20 @@ class CruiseLayout(Widget):
       description=tr("Adds a small push on top of sunnypilot's own acceleration, stronger in Aggressive and gentler in Relaxed. " +
                      "Eases off in curves and when sunnypilot slows or stops. Never goes past your set speed, and lead-car following still comes first."),
       param="AccelBoostSP")
+
+    self.limo_mode_toggle = toggle_item_sp(
+      title=tr("Limo Mode (Alpha)"),
+      description=tr("Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. " +
+                     "With Smart Cruise Control Map, starts slowing down earlier for curves on the map, not harder. " +
+                     "Firm braking for a lead or by the driving model, turns slowed by Smart Cruise Control Vision, and crawling speeds aren't smoothed. " +
+                     "Limo Curve sets how it accelerates, for each Driving Personality."),
+      param="LimoMode")
+
+    self.limo_curve_button = simple_button_item_sp(
+      button_text=lambda: tr("Limo Curve"),
+      button_width=800,
+      callback=lambda: self._set_current_panel(PanelType.LIMO)
+    )
 
     self.custom_acc_toggle = toggle_item_sp(
       title=tr("Custom ACC Speed Increments"),
@@ -93,6 +110,8 @@ class CruiseLayout(Widget):
       self.scc_v_toggle,
       self.scc_m_toggle,
       self.accel_boost_toggle,
+      self.limo_mode_toggle,
+      self.limo_curve_button,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,
@@ -103,6 +122,8 @@ class CruiseLayout(Widget):
   def _render(self, rect):
     if self._current_panel == PanelType.SLA:
       self._speed_limit_layout.render(rect)
+    elif self._current_panel == PanelType.LIMO:
+      self._limo_curve_layout.render(rect)
     else:
       self._scroller.render(rect)
 
@@ -112,8 +133,17 @@ class CruiseLayout(Widget):
     self.icbm_toggle.show_description(True)
     self.custom_acc_toggle.show_description(True)
 
+  def hide_event(self):
+    super().hide_event()
+    if self._current_panel == PanelType.LIMO:
+      self._limo_curve_layout.hide_event()
+
   def _set_current_panel(self, panel: PanelType):
+    if self._current_panel == PanelType.LIMO and panel != PanelType.LIMO:
+      self._limo_curve_layout.hide_event()
     self._current_panel = panel
+    if panel == PanelType.LIMO:
+      self._limo_curve_layout.show_event()
     if panel == PanelType.SLA:
       self._speed_limit_layout.show_event()
 
@@ -144,6 +174,8 @@ class CruiseLayout(Widget):
           self.icbm_toggle.show_description(True)
 
       self.accel_boost_toggle.action_item.set_enabled(has_long)
+      self.limo_mode_toggle.action_item.set_enabled(has_long)
+      self.limo_curve_button.action_item.set_enabled(has_long)
 
       if has_long or has_icbm:
         self.custom_acc_toggle.action_item.set_enabled(((has_long and not ui_state.CP.pcmCruise) or has_icbm) and ui_state.is_offroad())
@@ -161,6 +193,8 @@ class CruiseLayout(Widget):
       has_icbm = has_long = False
       self.icbm_toggle.action_item.set_enabled(False)
       self.accel_boost_toggle.action_item.set_enabled(False)
+      self.limo_mode_toggle.action_item.set_enabled(False)
+      self.limo_curve_button.action_item.set_enabled(False)
       self.icbm_toggle.set_description(tr(ONROAD_ONLY_DESCRIPTION))
 
     show_custom_acc_desc = False

@@ -36,6 +36,12 @@ sections:
     description: "Adds a small push on top of sunnypilot's own acceleration, stronger in Aggressive and gentler in Relaxed. Eases off in curves and when sunnypilot slows or stops. Never goes past your set speed, and lead-car following still comes first."
     enablement:
     - $ref: '#/macros/longitudinal'
+  - key: LimoMode
+    widget: toggle
+    title: Limo Mode (Alpha)
+    description: "Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. With Smart Cruise Control Map, starts slowing down earlier for curves on the map, not harder. Firm braking for a lead or by the driving model, turns slowed by Smart Cruise Control Vision, and crawling speeds aren't smoothed. Limo Curve on the device sets how it accelerates, for each Driving Personality."
+    enablement:
+    - $ref: '#/macros/longitudinal'
   - key: IntelligentCruiseButtonManagement
     widget: toggle
     title: Intelligent Cruise Button Management (ICBM) (Alpha)

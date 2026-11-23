@@ -1,6 +1,7 @@
 import json
 import math
 import platform
+import time
 
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal import custom
@@ -22,6 +23,11 @@ TO_RADIANS = math.pi / 180
 TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
+PASSED_DISTANCE = 30.0  # meters past a target to forget it
+GPS_AGE_MAX = 2.0  # seconds
+GPS_LATENCY = {'gpsLocation': 0.630, 'gpsLocationExternal': 0.095}  # s, from fix to message, as gps_fuser has it
+FUSED_SERVICE = "gpsLocationSP"
+FUSED_MAX_AGE = 0.5  # s
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
                      # reach the target velocity when inaccuracies in the distance modeling logic would cause overshoot.
                      # The value is multiplied against the target velocity to determine the additional distance. This is
@@ -74,6 +80,9 @@ class SmartCruiseControlMap:
 
   def __init__(self):
     self.params = Params()
+    self.limo = None
+    self.closest_target = (0., 0.)
+    self.closest_distance = math.inf
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
     self.long_enabled = False
@@ -103,8 +112,27 @@ class SmartCruiseControlMap:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("SmartCruiseControlMap")
 
+  def get_fused_location(self, sm: messaging.SubMaster):
+    """The fused location, None when there isn't a fresh one"""
+    if FUSED_SERVICE not in sm.recv_time:
+      return None
+    fused = sm[FUSED_SERVICE]
+    if not (fused.fused and fused.hasFix) or time.monotonic() - sm.recv_time[FUSED_SERVICE] > FUSED_MAX_AGE:
+      return None
+    return fused
+
   def update_calculations(self, sm: messaging.SubMaster) -> None:
+    limo = self.limo is not None and self.limo.enabled
     gps = sm[self.gps_location_service]
+    # how long the car has driven on since the position: the raw fix is once a second and late
+    gps_age = 0.
+    if limo:
+      fused = self.get_fused_location(sm)
+      if fused is not None:
+        gps = fused
+      else:
+        age = time.monotonic() - sm.recv_time[self.gps_location_service] + GPS_LATENCY.get(self.gps_location_service, 0.)
+        gps_age = min(max(age, 0.), GPS_AGE_MAX)
     self.last_position = Coordinate(gps.latitude, gps.longitude)
     lat = self.last_position.latitude
     lon = self.last_position.longitude
@@ -144,6 +172,11 @@ class SmartCruiseControlMap:
         continue
 
       d = forward_distances[i]
+
+      if self.limo is not None and self.limo.enabled:
+        if d - self.v_ego * gps_age < self.limo.approach_distance(tv) + tv * TARGET_OFFSET:
+          valid_velocities.append((float(tv), tlat, tlon))
+        continue
 
       a_diff = (self.a_ego - TARGET_ACCEL)
       accel_t = abs(a_diff / TARGET_JERK)
@@ -192,7 +225,8 @@ class SmartCruiseControlMap:
         tlat = target_velocity["latitude"]
         tlon = target_velocity["longitude"]
         tv = target_velocity["velocity"]
-        if tv > self.v_ego:
+        # don't drop the target when its speed is reached before its place is
+        if tv > self.v_ego and not (self.limo is not None and self.limo.enabled):
           continue
 
         if tlat == self.target_lat and tlon == self.target_lon and tv == self.v_target:
@@ -206,6 +240,22 @@ class SmartCruiseControlMap:
     self.v_target = min_v
     self.target_lat = target_lat
     self.target_lon = target_lon
+
+  def forget_passed_target(self) -> None:
+    """It's held until its place is reached, but not any longer when the map data gets stuck"""
+    target = (self.target_lat, self.target_lon)
+    if target != self.closest_target:
+      self.closest_target = target
+      self.closest_distance = math.inf
+
+    if target != (0, 0):
+      d = distance_to_point(self.last_position.latitude * TO_RADIANS, self.last_position.longitude * TO_RADIANS,
+                            self.target_lat * TO_RADIANS, self.target_lon * TO_RADIANS)
+      self.closest_distance = min(self.closest_distance, d)
+      if self.limo is not None and self.limo.enabled and d > self.closest_distance + PASSED_DISTANCE:
+        self.v_target = 0.0
+        self.target_lat = 0.0
+        self.target_lon = 0.0
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, TURNING
@@ -256,6 +306,7 @@ class SmartCruiseControlMap:
 
     self.update_params()
     self.update_calculations(sm)
+    self.forget_passed_target()
 
     self.is_enabled, self.is_active = self._update_state_machine()
 

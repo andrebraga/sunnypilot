@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from openpilot.cereal import custom
 from opendbc.car.structs import car
+from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import Priority, config_realtime_process
@@ -23,13 +24,15 @@ def main():
   cloudlog.info("plannerd got CarParamsSP")
 
   gps_location_service = get_gps_location_service(params)
-  ignore_services = ["liveMapDataSP", "carStateSP", "selfdriveStateSP", gps_location_service]
+  # the fused location where there is one, for Limo mode. It's not required
+  fused = [s for s in ("gpsLocationSP",) if s in SERVICE_LIST]
+  ignore_services = ["liveMapDataSP", "carStateSP", "selfdriveStateSP", gps_location_service, *fused]
 
   ldw = LaneDepartureWarning()
   longitudinal_planner = LongitudinalPlanner(CP, CP_SP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance', 'longitudinalPlanSP'])
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'radarState', 'modelV2', 'selfdriveState',
-                            'liveMapDataSP', 'carStateSP', 'selfdriveStateSP', gps_location_service],
+                            'liveMapDataSP', 'carStateSP', 'selfdriveStateSP', gps_location_service, *fused],
                            poll='modelV2', ignore_alive=ignore_services, ignore_avg_freq=ignore_services, ignore_valid=ignore_services)
 
   while True:

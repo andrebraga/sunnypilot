@@ -7,10 +7,12 @@ See the LICENSE.md file in the root directory for more details.
 import json
 import math
 import platform
+import time
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from openpilot.cereal import custom
+from openpilot.common.parameterized import parameterized
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
@@ -71,5 +73,59 @@ class TestSmartCruiseControlMap(OpenpilotTestCase):
     self.scc_m.update(self.sm, True, False, 25.0, 0.0, 30.0)
 
     self.assertAlmostEqual(self.scc_m.v_target, 24.0, delta=24.0 * 1e-6)
+
+  def test_limo_mode_holds_then_forgets_target(self):
+    target_lon = (200.0 / R) * (180.0 / math.pi)
+    self.mem_params.put("MapTargetVelocities", json.dumps([{"latitude": 0.0, "longitude": target_lon, "velocity": 15.0}]), block=True)
+    self.scc_m.limo = SimpleNamespace(enabled=True, approach_distance=lambda v_target: 250.0)
+
+    def drive_to(x, v_ego):
+      self.sm.recv_time = {self.scc_m.gps_location_service: time.monotonic()}
+      self.sm.__getitem__.return_value = SimpleNamespace(latitude=0.0, longitude=(x / R) * (180.0 / math.pi))
+      self.scc_m.update(self.sm, True, False, v_ego, 0.0, 30.0)
+
+    drive_to(0.0, 25.0)
+    assert self.scc_m.v_target == 15.0
+    # slower than the target before its place
+    drive_to(150.0, 14.5)
+    assert self.scc_m.v_target == 15.0
+    # the map data is stuck, it has to let go once it's passed
+    self.scc_m.limo.approach_distance = lambda v_target: 0.0
+    for x in range(200, 260, 5):
+      drive_to(float(x), 14.5)
+    drive_to(260.0, 14.5)
+    assert self.scc_m.v_target != 15.0
+
+  @parameterized.expand([(0.0, False), (0.3, True), (100.0, True)])
+  def test_limo_mode_position_is_old(self, gps_age, expected):
+    # 25 m/s, 20 m short of the distance to start at
+    target_lon = (285.0 / R) * (180.0 / math.pi)
+    self.mem_params.put("MapTargetVelocities", json.dumps([{"latitude": 0.0, "longitude": target_lon, "velocity": 15.0}]), block=True)
+    self.scc_m.limo = SimpleNamespace(enabled=True, approach_distance=lambda v_target: 250.0)
+    self.sm.__getitem__.return_value = SimpleNamespace(latitude=0.0, longitude=0.0)
+    self.sm.recv_time = {self.scc_m.gps_location_service: time.monotonic() - gps_age}
+    self.scc_m.update(self.sm, True, False, 25.0, 0.0, 30.0)
+    assert (self.scc_m.v_target == 15.0) == expected
+
+  @parameterized.expand([
+    (True, True, 0.1, False),  # fresh fused location, where the car is now: not yet
+    (True, True, 0.9, True),  # an old one doesn't count, back to the late raw fix
+    (False, True, 0.1, True),  # the fuser isn't sure
+    (None, False, 0.0, True),  # no fuser at all
+  ])
+  def test_limo_mode_fused_location(self, fused, fix, fused_age, expected):
+    # 25 m/s, starts slowing 265 m out. By the fused location it's 275 m, by the raw fix 300 m less 1.63 s driven: 259 m
+    target_lon = (300.0 / R) * (180.0 / math.pi)
+    self.mem_params.put("MapTargetVelocities", json.dumps([{"latitude": 0.0, "longitude": target_lon, "velocity": 15.0}]), block=True)
+    self.scc_m.limo = SimpleNamespace(enabled=True, approach_distance=lambda v_target: 250.0)
+    raw = SimpleNamespace(latitude=0.0, longitude=0.0)
+    services = {self.scc_m.gps_location_service: raw}
+    self.sm.recv_time = {self.scc_m.gps_location_service: time.monotonic() - 1.0}
+    if fused is not None:
+      services["gpsLocationSP"] = SimpleNamespace(latitude=0.0, longitude=(25.0 / R) * (180.0 / math.pi), fused=fused, hasFix=fix)
+      self.sm.recv_time["gpsLocationSP"] = time.monotonic() - fused_age
+    self.sm.__getitem__.side_effect = services.__getitem__
+    self.scc_m.update(self.sm, True, False, 25.0, 0.0, 30.0)
+    assert (self.scc_m.v_target == 15.0) == expected
 
   # TODO-SP: mock data from modelV2 to test other states
