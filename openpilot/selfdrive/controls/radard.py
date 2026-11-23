@@ -28,7 +28,7 @@ SPEED, ACCEL = 0, 1     # Kalman filter states enum
 V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 DBC_MOTION_STATIONARY = 1
 DBC_MOTION_MOVING = 2
-STATIONARY_MATCH_SPEED = 3.  # m/s, a stationary track isn't the lead when the model's lead is moving faster than this
+STATIONARY_MATCH_SPEED = 5.  # m/s, a stationary track isn't the lead when the model's lead is moving faster than this
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
@@ -107,8 +107,7 @@ class Track:
   def potential_low_speed_lead(self, v_ego: float):
     # stop for stuff in front of you and low speed, even without model confirmation
     # Radar points closer than 0.75, are almost always glitches on toyota radars
-    # Radars that report stationary objects see plenty that aren't in the way, those need the model
-    return not self.stationary and abs(self.yRel) < 1.0 and (v_ego < V_EGO_STATIONARY) and (0.75 < self.dRel < 25)
+    return abs(self.yRel) < 1.0 and (v_ego < V_EGO_STATIONARY) and (0.75 < self.dRel < 25)
 
   def __str__(self):
     ret = f"x: {self.dRel:4.1f}  y: {self.yRel:4.1f}  v: {self.vRel:4.1f}  a: {self.aLeadK:4.1f}"

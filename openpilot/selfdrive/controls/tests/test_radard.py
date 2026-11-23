@@ -61,7 +61,7 @@ def test_stationary_track_is_not_a_moving_lead():
 
 
 def test_stationary_track_is_a_stopped_lead():
-  for v_model in (0.0, 1.0, 2.5):
+  for v_model in (0.0, 1.0, 2.5, 4.5):
     out = lead([track(1, 30.0, 0.0, True)], model_lead(31.0, v_model))
     assert out["radar"] and out["radarTrackId"] == 1
 
@@ -73,10 +73,11 @@ def test_stopping_lead_is_still_matched():
     assert out["radar"] and out["radarTrackId"] == 1
 
 
-def test_low_speed_override_is_not_for_stationary_tracks():
+def test_low_speed_override_works_for_stationary_tracks():
   model = model_lead(50.0, 0.0)
-  assert not lead([track(1, 3.0, 0.0, True, v_ego=3.0)], model, prob=0.0, v_ego=3.0)["present"]
-  assert lead([track(1, 3.0, 1.0, False, v_ego=3.0)], model, prob=0.0, v_ego=3.0)["present"]
+  for stationary in (False, True):
+    out = lead([track(1, 3.0, 0.0, stationary, v_ego=3.0)], model, prob=0.0, v_ego=3.0)
+    assert out["present"] and out["radar"]
 
 
 def test_radars_without_motion_state_are_unaffected():
