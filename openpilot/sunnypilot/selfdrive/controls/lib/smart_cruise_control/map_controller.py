@@ -1,6 +1,7 @@
 import json
 import math
 import platform
+import time
 
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal import custom
@@ -23,6 +24,7 @@ TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 PASSED_DISTANCE = 30.0  # meters past a target to forget it
+GPS_AGE_MAX = 1.5  # seconds
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
                      # reach the target velocity when inaccuracies in the distance modeling logic would cause overshoot.
                      # The value is multiplied against the target velocity to determine the additional distance. This is
@@ -72,7 +74,6 @@ class SmartCruiseControlMap:
   a_ego: float = 0.
   output_v_target: float = V_CRUISE_UNSET
   output_a_target: float = 0.
-  target_distance: float = 0.
 
   def __init__(self):
     self.params = Params()
@@ -138,6 +139,10 @@ class SmartCruiseControlMap:
     forward_points = self.target_velocities[min_idx:]
     forward_distances = distances[min_idx:]
 
+    gps_age = 0.
+    if self.limo is not None and self.limo.enabled:
+      gps_age = min(max(time.monotonic() - sm.recv_time[self.gps_location_service], 0.), GPS_AGE_MAX)
+
     # find velocities that we are within the distance we need to adjust for
     valid_velocities = []
     for i in range(len(forward_points)):
@@ -151,7 +156,8 @@ class SmartCruiseControlMap:
       d = forward_distances[i]
 
       if self.limo is not None and self.limo.enabled:
-        if d < self.limo.approach_distance(tv) + tv * TARGET_OFFSET:
+        # the position is only updated once a second
+        if d - self.v_ego * gps_age < self.limo.approach_distance(tv) + tv * TARGET_OFFSET:
           valid_velocities.append((float(tv), tlat, tlon))
         continue
 
@@ -218,8 +224,8 @@ class SmartCruiseControlMap:
     self.target_lat = target_lat
     self.target_lon = target_lon
 
-  def update_target_distance(self) -> None:
-    self.target_distance = 0.
+  def forget_passed_target(self) -> None:
+    """It's held until its place is reached, but not any longer when the map data gets stuck"""
     target = (self.target_lat, self.target_lon)
     if target != self.closest_target:
       self.closest_target = target
@@ -228,9 +234,6 @@ class SmartCruiseControlMap:
     if target != (0, 0):
       d = distance_to_point(self.last_position.latitude * TO_RADIANS, self.last_position.longitude * TO_RADIANS,
                             self.target_lat * TO_RADIANS, self.target_lon * TO_RADIANS)
-      self.target_distance = max(d - self.v_target * TARGET_OFFSET, 0.)
-
-      # it's held until its place is reached, but not any longer when the map data gets stuck
       self.closest_distance = min(self.closest_distance, d)
       if self.limo is not None and self.limo.enabled and d > self.closest_distance + PASSED_DISTANCE:
         self.v_target = 0.0
@@ -286,7 +289,7 @@ class SmartCruiseControlMap:
 
     self.update_params()
     self.update_calculations(sm)
-    self.update_target_distance()
+    self.forget_passed_target()
 
     self.is_enabled, self.is_active = self._update_state_machine()
 

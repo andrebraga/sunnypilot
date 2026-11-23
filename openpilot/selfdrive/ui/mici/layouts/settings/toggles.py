@@ -39,7 +39,7 @@ class TogglesLayoutMici(NavScroller):
     radar_tracks = BigMultiParamToggle("radar tracks", "RadarTracks", ["off", "lead only", "full radar"])
     draw_radar_tracks = BigParamControl("draw radar tracks", "DrawRadarTracks")
     self._limo_mode = BigParamControl("limo mode", "LimoMode",
-                                      description="Eases acceleration and braking in and out, and slows down in time for map curves and speed limits.\n" +
+                                      description="Eases acceleration and braking in and out, and slows down earlier for map curves and speed limits.\n" +
                                                   "Firm braking isn't smoothed.")
 
     self._scroller.add_widgets([

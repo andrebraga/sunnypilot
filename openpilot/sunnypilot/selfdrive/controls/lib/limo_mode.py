@@ -31,10 +31,9 @@ TARGET_STEP = 2.0  # m/s^2, bounds the jerk of big changes
 
 CRUISE_TAU = 0.5  # s, time constant of the last bit of a speed change
 VISION_TIME = 4.0  # s, it comes and goes in a curve, stay out of it for this long after
-CRUISE_DECEL = 0.5  # m/s^2, the driver lowered the set speed
-APPROACH_DECEL = 1.2  # m/s^2, slowing for something at a known distance
-APPROACH_DECEL_LATE = 1.5  # m/s^2, same but it was seen late. maps and GPS can be wrong, so not more
-CRUISE_BRAKE_MAX = 2.0  # m/s^2, cruise never brakes harder than this, whatever it's for
+CRUISE_DECEL = 0.5  # m/s^2, never harder than without Limo mode, the set speed and the map can be wrong
+APPROACH_DECEL = 0.45  # m/s^2, what to plan with. slowing for something at a known distance starts earlier instead
+APPROACH_DECEL_MIN = 0.2  # m/s^2, the car doesn't slow down as it's told to
 ARRIVAL_TAUS = 1.5  # cruise time constants until a slowdown counts as arrived
 
 # Smoothing must never make the car brake less than the lead and model ask for. How far above their targets the output
@@ -144,7 +143,7 @@ class LimoMode:
 
   What it can't do:
   - brake less than the lead and model targets, other than by the blend margins
-  - brake more than CRUISE_BRAKE_MAX on its own
+  - brake more than CRUISE_DECEL on its own
   - accelerate past ACCEL_MAX or the set speed
   """
   def __init__(self, CP, dt: float = DT_MDL):
@@ -210,13 +209,14 @@ class LimoMode:
     return self.v_ego + self._pending(self.cruise) + self._pending(self.blend) + self._pending_actuators
 
   @fail_safe(0.0)
-  def approach_distance(self, v_target: float, decel: float = APPROACH_DECEL) -> float:
-    """Distance to slow down to v_target at decel, given everything the car is already committed to"""
+  def approach_distance(self, v_target: float) -> float:
+    """Distance to slow down to v_target, given everything the car is already committed to"""
     dv = self.committed_speed - v_target
     if not dv > 0.0:
       return 0.0
 
     # constant decel followed by an exponential tail
+    decel = max(APPROACH_DECEL - max(self.disturbance, 0.0), APPROACH_DECEL_MIN)
     tail = min(dv, decel * CRUISE_TAU)
     t_constant = (dv - tail) / decel
     moment = (dv - tail) * t_constant / 2.0 + tail * (t_constant + CRUISE_TAU)
@@ -230,36 +230,16 @@ class LimoMode:
     distance += self._pending_actuators * (t_end - self.actuator_delay / 2.0)
     return max(distance, 0.0)
 
-  def approach_decel(self, v_target: float, distance: float) -> float:
-    """Lowest decel to be at v_target in distance"""
-    if distance <= 0.0 or self.approach_distance(v_target, APPROACH_DECEL) <= distance:
-      return APPROACH_DECEL
-    if self.approach_distance(v_target, APPROACH_DECEL_LATE) >= distance:
-      return APPROACH_DECEL_LATE
-
-    low, high = APPROACH_DECEL, APPROACH_DECEL_LATE
-    for _ in range(8):
-      mid = (low + high) / 2.0
-      if self.approach_distance(v_target, mid) > distance:
-        low = mid
-      else:
-        high = mid
-    return high
-
   @fail_safe(None)
-  def cruise_target(self, v_cruise: float, source, distance: float) -> float | None:
+  def cruise_target(self, v_cruise: float, source) -> float | None:
     """Unsmoothed cruise target, None when Limo mode has to stay out of it"""
     # the vision controller's target speed moves with the speed of the car and is tuned for the planner's own response
     self.vision_time = VISION_TIME if source == LongitudinalPlanSource.sccVision else max(self.vision_time - self.dt, 0.0)
     if self.vision_time > 0.0:
       return None
 
-    if source in (LongitudinalPlanSource.sccMap, LongitudinalPlanSource.speedLimitAssist):
-      decel = self.approach_decel(v_cruise, distance)
-    else:
-      decel = CRUISE_DECEL
-    accel = float(np.clip((v_cruise - self.committed_speed) / CRUISE_TAU, -decel, ACCEL_MAX))
-    target = float(np.clip(accel - self.disturbance, -CRUISE_BRAKE_MAX, ACCEL_MAX))
+    accel = (v_cruise - self.committed_speed) / CRUISE_TAU
+    target = float(np.clip(accel - self.disturbance, -CRUISE_DECEL, ACCEL_MAX))
     return target if np.isfinite(target) else None
 
   @staticmethod

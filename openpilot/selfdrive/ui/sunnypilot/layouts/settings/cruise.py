@@ -66,8 +66,8 @@ class CruiseLayout(Widget):
     self.limo_mode_toggle = toggle_item_sp(
       title=tr("Limo Mode (Alpha)"),
       description=tr("Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. " +
-                     "With Smart Cruise Control Map and Speed Limit Assist, slows down in time for curves and lower speed limits on the map. " +
-                     "It brakes harder for them than without Limo Mode, for wrong map data too. " +
+                     "With Smart Cruise Control Map and Speed Limit Assist, starts slowing down earlier for curves and " +
+                     "lower speed limits on the map, not harder. " +
                      "Firm braking for a lead or by the driving model, turns slowed by Smart Cruise Control Vision, and crawling speeds aren't smoothed. " +
                      "Driving Personality sets how gradual it is."),
       param="LimoMode")

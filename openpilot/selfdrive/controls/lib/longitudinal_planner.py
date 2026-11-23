@@ -122,7 +122,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     limo_target = None
     if limo_active:
       # boost and starting need to know what cruise wants, not how far the smoothing got
-      limo_target = self.limo.cruise_target(v_cruise, self.source, self.target_distance)
+      limo_target = self.limo.cruise_target(v_cruise, self.source)
       if limo_target is not None:
         cruise_target = limo_target
         cruise_should_stop = should_stop(v_ego, cruise_target)

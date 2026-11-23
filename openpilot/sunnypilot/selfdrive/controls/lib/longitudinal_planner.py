@@ -71,15 +71,6 @@ class LongitudinalPlannerSP:
     self.output_v_target, self.output_a_target = targets[self.source]
     return self.output_v_target, self.output_a_target
 
-  @property
-  def target_distance(self) -> float:
-    """Distance to where the target speed applies, 0 when it's unknown"""
-    if self.source == LongitudinalPlanSource.sccMap:
-      return self.scc.map.target_distance
-    if self.source == LongitudinalPlanSource.speedLimitAssist:
-      return self.resolver.distance
-    return 0.
-
   def update(self, sm: messaging.SubMaster) -> None:
     if self.accel_boost_sp.update_params():
       self.accel_boost = self.accel_boost_sp if self.accel_boost_sp.enabled and self.openpilot_longitudinal else AccelBoost()
