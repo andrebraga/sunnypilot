@@ -167,3 +167,23 @@ class TestLimoCurve(OpenpilotTestCase):
     speed, accel = preview(curve, 13.9, 30.0)
     assert len(speed) == len(accel) == 601 and np.isfinite(speed).all()
     assert accel.max() <= curve.strength + 1e-6 and speed.max() < 14.2
+
+  def test_anticipation_only_adds_braking(self):
+    rng = np.random.default_rng(2)
+    limo = make_curved(LimoCurve(1.2, 1.0, 2.4, 1.0))
+    for v in (0.0, 1.0, 3.0, 10.0, 30.0):
+      limo.start_frame(v, 0.0, Personality.standard, True)
+      for a_lead, a_anticipation in rng.uniform(-4.0, 3.0, (100, 2)):
+        out = limo.anticipate(a_lead, a_anticipation)
+        assert min(a_lead, a_anticipation) - 1e-9 <= out <= a_lead
+        if v <= 2.0:
+          assert out == a_lead
+      assert limo.anticipate(1.0, np.inf) == 1.0 and limo.anticipate(1.0, np.nan) == 1.0
+
+  def test_anticipation_settings(self):
+    off, full = LimoCurve(2.0, 0.2, 1.0, 0.0), LimoCurve(2.0, 0.2, 1.0, 1.0)
+    assert (off.jerk_scale, off.extra_follow) == (1.0, 0.0)
+    assert full.jerk_scale > 1.0 and full.extra_follow > 0.0
+    assert curves_from_param({"relaxed": {"strength": 1.0, "build": 0.5, "ease": 2.0}})["relaxed"].anticipation == DEFAULTS["relaxed"].anticipation
+    for name in ("aggressive", "standard"):
+      assert DEFAULTS[name].anticipation == 0.0

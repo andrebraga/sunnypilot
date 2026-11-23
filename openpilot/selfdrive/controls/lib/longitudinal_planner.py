@@ -31,6 +31,9 @@ def get_cruise_accel(v_cruise, v_ego, a_cruise_prev, dt):
   return target_accel
 
 
+ANTICIPATION_HORIZON = 4.0  # s
+
+
 class LongitudinalPlanner(LongitudinalPlannerSP):
   def __init__(self, CP, CP_SP, init_v=0.0, init_a=0.0, dt=DT_MDL):
     self.CP = CP
@@ -39,6 +42,10 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.fcw = False
     self.dt = dt
     self.accel_boost = AccelBoost()
+    # Limo mode: a smoother lead plan with more room. It can only add braking to the lead plan, never take it away
+    self.mpc_anticipation = LongitudinalMpc(dt=dt)
+    self.anticipating = False
+    self.anticipation_failed = False
 
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.a_cruise = init_a
@@ -96,6 +103,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     else:
       self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
     self.mpc.update(sm['radarState'], personality=sm['selfdriveState'].personality)
+    self.update_anticipation(sm, limo_active, prev_accel_constraint)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
@@ -151,9 +159,44 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
 
+  def update_anticipation(self, sm, limo_active: bool, prev_accel_constraint: bool) -> None:
+    curve = self.limo.curve
+    anticipating = limo_active and curve.anticipation > 0.0 and not self.anticipation_failed
+    try:
+      if anticipating:
+        mpc = self.mpc_anticipation
+        if not self.anticipating:
+          mpc.reset()
+          mpc.a_prev[:] = self.output_a_target
+        personality = sm['selfdriveState'].personality
+        mpc.set_weights(prev_accel_constraint, personality=personality, jerk_scale=curve.jerk_scale)
+        mpc.set_cur_state(self.v_desired_filter.x, self.output_a_target)
+        mpc.update(sm['radarState'], personality=personality, extra_follow=curve.extra_follow)
+        # a solver that failed this time has reset its plan to standing still
+        anticipating = bool(abs(mpc.v_solution[0] - self.v_desired_filter.x) < 0.1 and np.isfinite(mpc.a_solution).all())
+    except Exception:
+      cloudlog.exception("limo mode anticipation failed, off until restart")
+      self.anticipation_failed = True
+      anticipating = False
+    self.anticipating = anticipating
+
+  def get_anticipation(self, action_t: float) -> float:
+    """The smoother lead plan's target, inf when there isn't one"""
+    if not self.anticipating:
+      return np.inf
+    v = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc_anticipation.v_solution)
+    a = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc_anticipation.a_solution)
+    target = get_accel_from_plan(v, a, CONTROL_N_T_IDX, action_t=action_t)
+    # earlier, not more: never braking harder than the lead plan itself does within the next few seconds
+    ahead = self.mpc.a_solution[(T_IDXS_MPC >= action_t) & (T_IDXS_MPC <= action_t + ANTICIPATION_HORIZON)]
+    target = max(target, float(np.min(ahead))) if len(ahead) else np.inf
+    return target if np.isfinite(target) else np.inf
+
   def get_limo_plan(self, sm, cruise_target, a_lead, a_model, action_t):
     a_lead_ahead = get_accel_from_plan(self.v_desired_trajectory, self.a_desired_trajectory, CONTROL_N_T_IDX,
                                        action_t=action_t + self.limo.lookahead)
+    a_lead = self.limo.anticipate(a_lead, self.get_anticipation(action_t))
+    a_lead_ahead = self.limo.anticipate(a_lead_ahead, self.get_anticipation(action_t + self.limo.lookahead))
     a_model_ahead = a_model
     model_v, model_a = sm['modelV2'].velocity.x, sm['modelV2'].acceleration.x
     if len(model_v) == len(model_a) == len(ModelConstants.T_IDXS):

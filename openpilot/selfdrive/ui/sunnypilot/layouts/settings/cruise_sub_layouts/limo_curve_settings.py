@@ -24,6 +24,7 @@ from openpilot.system.ui.widgets.network import NavButton
 HEADER_HEIGHT = 120
 SLIDER_HEIGHT = 172
 SLIDER_SPACING = 14
+SLIDER_COLUMN_GAP = 70
 BACK_WIDTH = 230
 RESET_WIDTH = 240
 
@@ -49,10 +50,12 @@ class LimoCurveSettingsLayout(Widget):
       return self._child(SliderStepper(title, r.min, r.max, r.step, r.min, lambda value: self._on_changed(key, value), self._save, label, hints))
 
     self._sliders = {
-      "strength": slider("strength", lambda: tr("Strength: how hard it accelerates at most"), lambda v: f"{v:.2f} m/s^2",
-                         (tr("gentle"), tr("sporty"))),
-      "build": slider("build", lambda: tr("Build-up: how long until it pushes"), lambda v: f"{v:.2f} s", (tr("immediate"), tr("gradual"))),
-      "ease": slider("ease", lambda: tr("Ease-off: how long it takes to settle"), lambda v: f"{v:.1f} s", (tr("short"), tr("long"))),
+      "strength": slider("strength", lambda: tr("Strength"), lambda v: f"{v:.2f} m/s^2",
+                         (tr("gentle push"), tr("full push"))),
+      "build": slider("build", lambda: tr("Build-up"), lambda v: f"{v:.2f} s", (tr("right away"), tr("gradually"))),
+      "ease": slider("ease", lambda: tr("Ease-off"), lambda v: f"{v:.1f} s", (tr("settles quickly"), tr("settles slowly"))),
+      "anticipation": slider("anticipation", lambda: tr("Anticipation"), lambda v: f"{v * 100:.0f}%",
+                             (tr("brakes late"), tr("brakes early"))),
     }
 
   @property
@@ -109,11 +112,14 @@ class LimoCurveSettingsLayout(Widget):
     self._personality.render(rl.Rectangle(rect.x + (rect.width - personality_width) / 2, rect.y, personality_width, HEADER_HEIGHT))
     self._reset_button.render(rl.Rectangle(rect.x + rect.width - RESET_WIDTH, rect.y + 5, RESET_WIDTH, HEADER_HEIGHT - 10))
 
-    y = rect.y + rect.height
-    for slider in reversed(self._sliders.values()):
-      y -= SLIDER_HEIGHT
-      slider.render(rl.Rectangle(rect.x, y, rect.width, SLIDER_HEIGHT))
-      y -= SLIDER_SPACING
+    # two columns of sliders
+    rows = (len(self._sliders) + 1) // 2
+    width = (rect.width - SLIDER_COLUMN_GAP) / 2
+    y = rect.y + rect.height - rows * (SLIDER_HEIGHT + SLIDER_SPACING) + SLIDER_SPACING
+    for i, slider in enumerate(self._sliders.values()):
+      row, column = divmod(i, 2)
+      slider.render(rl.Rectangle(rect.x + column * (width + SLIDER_COLUMN_GAP), y + row * (SLIDER_HEIGHT + SLIDER_SPACING), width, SLIDER_HEIGHT))
+    y -= SLIDER_SPACING
 
     top = rect.y + HEADER_HEIGHT + 24
     self._plot.render(rl.Rectangle(rect.x, top, rect.width, y - top))

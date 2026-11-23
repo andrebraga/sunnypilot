@@ -31,7 +31,10 @@ RANGES = {
   "strength": Range(0.6, ACCEL_MAX, 0.05),  # m/s^2, the most it accelerates with
   "build": Range(0.2, 1.5, 0.05),  # s, when the acceleration builds the fastest
   "ease": Range(0.8, 4.0, 0.1),  # s, until a change is all the way through
+  "anticipation": Range(0.0, 1.0, 0.05),  # how much earlier and gentler it slows down for the lead, as far as that's predictable
 }
+ANTICIPATION_JERK_SCALE = (1.0, 5.0)  # lead planner smoothness weight at 0 and 1
+ANTICIPATION_FOLLOW = (0.0, 0.5)  # s, and its extra following distance
 
 
 @dataclass(frozen=True)
@@ -39,10 +42,19 @@ class LimoCurve:
   strength: float
   build: float
   ease: float
+  anticipation: float = 0.0
 
   def __post_init__(self):
     for name, r in RANGES.items():
       object.__setattr__(self, name, r.clip(float(getattr(self, name))))
+
+  @property
+  def jerk_scale(self) -> float:
+    return float(np.interp(self.anticipation, [0.0, 1.0], ANTICIPATION_JERK_SCALE))
+
+  @property
+  def extra_follow(self) -> float:
+    return float(np.interp(self.anticipation, [0.0, 1.0], ANTICIPATION_FOLLOW))
 
   @property
   def ease_time(self) -> float:
@@ -58,7 +70,7 @@ class LimoCurve:
 DEFAULTS = {
   "aggressive": LimoCurve(ACCEL_MAX, 0.2, 1.0),
   "standard": LimoCurve(ACCEL_MAX, 0.2, 1.4),
-  "relaxed": LimoCurve(1.2, 1.0, 2.4),
+  "relaxed": LimoCurve(1.2, 1.0, 2.4, 1.0),
 }
 
 

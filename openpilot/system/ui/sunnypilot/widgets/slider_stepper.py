@@ -13,7 +13,7 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.sunnypilot.lib.styles import style
 from openpilot.system.ui.widgets import Widget
 
-BUTTON_SIZE = 110
+BUTTON_SIZE = 100
 SPACING = 30
 TRACK_HEIGHT = 14
 KNOB_RADIUS = 30

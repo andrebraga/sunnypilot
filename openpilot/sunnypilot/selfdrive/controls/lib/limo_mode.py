@@ -22,7 +22,7 @@ LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 
 # Cruise goes through a window with the shape of the curve. So does what the lead and model ask for, as far as that's
 # longer than what they do on their own
-CURVE_RATES = {"strength": 1.0, "build": 0.3, "ease": 0.6}  # 1/s, changes must not step the output
+CURVE_RATES = {"strength": 1.0, "build": 0.3, "ease": 0.6, "anticipation": 0.2}  # 1/s, changes must not step the output
 # Everything goes through one that's just long enough to round off the corners
 BLEND_TIME = 0.2  # s
 BLEND_ONSET = 0.08  # s
@@ -250,6 +250,12 @@ class LimoMode:
     accel = (v_cruise - self.committed_speed) / CRUISE_TAU
     target = clip(accel - self.disturbance, -CRUISE_DECEL, self.curve.strength)
     return target if np.isfinite(target) else None
+
+  def anticipate(self, a_lead: float, a_anticipation: float) -> float:
+    """The lead target with the smoother lead plan's braking. Only ever adds braking, and none at crawl speeds"""
+    if not np.isfinite(a_anticipation):
+      return a_lead
+    return a_lead + (1.0 - smoothstep(self.v_ego, *CRAWL_SPEED)) * min(a_anticipation - a_lead, 0.0)
 
   @staticmethod
   def model_accel(a_target: float, a_now: float, a_ahead: float) -> float:
