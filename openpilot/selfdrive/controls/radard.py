@@ -28,6 +28,7 @@ SPEED, ACCEL = 0, 1     # Kalman filter states enum
 V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 DBC_MOTION_STATIONARY = 1
 DBC_MOTION_MOVING = 2
+STATIONARY_MATCH_SPEED = 3.  # m/s, a stationary track isn't the lead when the model's lead is moving faster than this
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
@@ -58,18 +59,20 @@ class Track:
   def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams):
     self.identifier = identifier
     self.cnt = 0
+    self.stationary = False  # as reported by the radar
     self.aLeadTau = FirstOrderFilter(_LEAD_ACCEL_TAU, 0.45, DT_MDL)
     self.K_A = kalman_params.A
     self.K_C = kalman_params.C
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
 
-  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float):
+  def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, stationary: bool = False):
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
     self.yRel = y_rel   # -LAT_DIST
     self.vRel = v_rel   # REL_SPEED
     self.vLead = v_lead
+    self.stationary = stationary
 
     # computed velocity and accelerations
     if self.cnt > 0:
@@ -104,7 +107,8 @@ class Track:
   def potential_low_speed_lead(self, v_ego: float):
     # stop for stuff in front of you and low speed, even without model confirmation
     # Radar points closer than 0.75, are almost always glitches on toyota radars
-    return abs(self.yRel) < 1.0 and (v_ego < V_EGO_STATIONARY) and (0.75 < self.dRel < 25)
+    # Radars that report stationary objects see plenty that aren't in the way, those need the model
+    return not self.stationary and abs(self.yRel) < 1.0 and (v_ego < V_EGO_STATIONARY) and (0.75 < self.dRel < 25)
 
   def __str__(self):
     ret = f"x: {self.dRel:4.1f}  y: {self.yRel:4.1f}  v: {self.vRel:4.1f}  a: {self.aLeadK:4.1f}"
@@ -127,7 +131,12 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks
     # This isn't exactly right, but it's a good heuristic
     return prob_d * prob_y * prob_v
 
-  track = max(tracks.values(), key=prob)
+  # road furniture, parked cars and oncoming lanes next to a moving lead can be the best match for it
+  candidates = [c for c in tracks.values() if not c.stationary or abs(c.vRel + v_ego - lead.v[0]) < STATIONARY_MATCH_SPEED]
+  if len(candidates) == 0:
+    return None
+
+  track = max(candidates, key=prob)
 
   # if no 'sane' match is found return -1
   # stationary radar points can be false positives
@@ -227,7 +236,7 @@ class RadarD:
       self.last_v_ego_frame = sm.recv_frame['carState']
 
     ar_pts = {
-      pt.trackId: [pt.dRel, pt.yRel, pt.vRel]
+      pt.trackId: [pt.dRel, pt.yRel, pt.vRel, pt.motionState == DBC_MOTION_STATIONARY]
       for pt in rr.points
       if radar_point_eligible_for_fusion(self.CP, self.CP_SP, pt)
     }
@@ -247,7 +256,7 @@ class RadarD:
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
         self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead)
+      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()
