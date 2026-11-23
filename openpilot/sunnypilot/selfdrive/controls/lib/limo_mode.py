@@ -58,8 +58,13 @@ DISTURBANCE_MAX = 0.4  # m/s^2
 DISTURBANCE_MIN_SPEED = 2.5  # m/s
 
 
+def clip(x: float, low: float, high: float) -> float:
+  """np.clip for one value, it is slow at that. NaN stays NaN"""
+  return float(min(max(x, low), high))
+
+
 def smoothstep(x: float, start: float, end: float) -> float:
-  t = float(np.clip((x - start) / (end - start), 0.0, 1.0))
+  t = clip((x - start) / (end - start), 0.0, 1.0)
   return t * t * (3.0 - 2.0 * t)
 
 
@@ -102,7 +107,7 @@ class Window:
     self.history[:] = value
 
   def update(self, value: float) -> float:
-    self.history = np.roll(self.history, 1)
+    self.history[1:] = self.history[:-1]
     self.history[0] = value
     return self.value
 
@@ -166,7 +171,7 @@ class LimoMode:
 
   def limit_rise(self, accel: float) -> float:
     """Limits how much and how quickly the car accelerates. It only ever takes away from positive targets"""
-    rise = self.rise.update(float(np.clip(accel, 0.0, self.curve.strength)))
+    rise = self.rise.update(clip(accel, 0.0, self.curve.strength))
     return accel if accel <= 0.0 else min(accel, rise)
 
   @fail_safe(None)
@@ -188,7 +193,7 @@ class LimoMode:
       self.curve = self.curve.towards(curve, CURVE_RATES, self.dt)
       self.set_curve_kernels()
     if active and v_ego > DISTURBANCE_MIN_SPEED:
-      disturbance = float(np.clip(a_ego - self.outputs[-1], -DISTURBANCE_MAX, DISTURBANCE_MAX))
+      disturbance = clip(a_ego - self.outputs[-1], -DISTURBANCE_MAX, DISTURBANCE_MAX)
       self.disturbance += (disturbance - self.disturbance) * self.dt / DISTURBANCE_TAU
 
   def _pending(self, window: Window) -> float:
@@ -243,13 +248,13 @@ class LimoMode:
       return None
 
     accel = (v_cruise - self.committed_speed) / CRUISE_TAU
-    target = float(np.clip(accel - self.disturbance, -CRUISE_DECEL, self.curve.strength))
+    target = clip(accel - self.disturbance, -CRUISE_DECEL, self.curve.strength)
     return target if np.isfinite(target) else None
 
   @staticmethod
   def model_accel(a_target: float, a_now: float, a_ahead: float) -> float:
     """The model's target, braking earlier when its own plan brakes more later"""
-    return a_target + float(np.clip(min(a_ahead, 0.0) - min(a_now, 0.0), -MODEL_LOOKAHEAD_DECEL, 0.0))
+    return a_target + clip(min(a_ahead, 0.0) - min(a_now, 0.0), -MODEL_LOOKAHEAD_DECEL, 0.0)
 
   def cruise_accel(self, target: float, a_limit: float) -> float:
     """
@@ -260,7 +265,7 @@ class LimoMode:
     np.maximum(self.cruise.history, min(target, 0.0), out=self.cruise.history)
     last = self.cruise.value
     target = min(target, a_limit + CRUISE_HEADROOM)
-    return self.cruise.update(float(np.clip(target, last - TARGET_STEP, last + TARGET_STEP)))
+    return self.cruise.update(clip(target, last - TARGET_STEP, last + TARGET_STEP))
 
   @staticmethod
   def _limit(output: float, a_now: float, margin: list[float], follow: float = 0.0) -> float:
@@ -286,9 +291,9 @@ class LimoMode:
       a_now = min(a_now, self.rise.value)
     a_cruise = self.cruise_accel(cruise_target, a_now)
     # it continues from its own targets like without smoothing, and has to know about the smoothed cruise
-    self.a_plan = float(np.clip(min(a_cruise, a_lead, a_model), ACCEL_MIN, ACCEL_MAX))
+    self.a_plan = clip(min(a_cruise, a_lead, a_model), ACCEL_MIN, ACCEL_MAX)
 
-    output = self.blend.update(float(np.clip(min(a_cruise, a_ahead), ACCEL_MIN, ACCEL_MAX)))
+    output = self.blend.update(clip(min(a_cruise, a_ahead), ACCEL_MIN, ACCEL_MAX))
 
     crawling = smoothstep(self.v_ego, *CRAWL_SPEED)
     if output < a_now < a_cruise:
@@ -302,17 +307,17 @@ class LimoMode:
     # last, so that nothing above can get past it
     output = self._limit(output, a_model, BLEND_MARGIN_V, crawling)
     output = self._limit(output, a_lead, LEAD_MARGIN_V if has_lead else BLEND_MARGIN_V, 1.0 if fcw else crawling)
-    output = float(np.clip(output, ACCEL_MIN, ACCEL_MAX))
+    output = clip(output, ACCEL_MIN, ACCEL_MAX)
     if not np.isfinite(output):
       return None
 
-    self.outputs = np.roll(self.outputs, 1)
+    self.outputs[1:] = self.outputs[:-1]
     self.outputs[0] = output
     return output, a_cruise
 
 
 def preview(curve: LimoCurve, v_target: float, duration: float) -> tuple[np.ndarray, np.ndarray]:
-  """Speed and acceleration of an ideal car from a stop to v_target on an open road, every DT_MDL"""
+  """Speed and acceleration of an ideal car from a stop to v_target on an open road, every DT_MDL. It runs in the UI, keep it quick"""
   limo = LimoMode(SimpleNamespace(openpilotLongitudinalControl=True, longitudinalActuatorDelay=0.0))
   limo.curves = dict.fromkeys(limo.curves, curve)
   limo.curve = curve
@@ -325,4 +330,9 @@ def preview(curve: LimoCurve, v_target: float, duration: float) -> tuple[np.ndar
     plan = limo.plan(target, ACCEL_MAX, ACCEL_MAX, ACCEL_MAX, ACCEL_MAX, np.inf, False) if target is not None else None
     accel[i + 1] = plan[0] if plan is not None else 0.0
     speed[i + 1] = max(speed[i] + accel[i + 1] * limo.dt, 0.0)
+    # nothing changes anymore once it's settled
+    settled = int(round(1.0 / limo.dt))
+    if i > settled and abs(speed[i + 1] - v_target) < 1e-3 * v_target and np.abs(accel[i + 1 - settled:i + 2]).max() < 1e-3:
+      speed[i + 2:], accel[i + 2:] = speed[i + 1], accel[i + 1]
+      break
   return speed, accel
