@@ -155,14 +155,14 @@ class SliderStepper(Widget):
     if self._default is not None:
       x = track.x + self._fraction(self._default) * track.width
       rl.draw_rectangle_rounded(rl.Rectangle(x - 3, center_y - 22, 6, 44), 1.0, 6, style.ITEM_DESC_TEXT_COLOR)
-    rl.draw_circle_v(rl.Vector2(knob_x, center_y), KNOB_RADIUS_PRESSED if self._dragging else KNOB_RADIUS,
-                     style.TOGGLE_KNOB_COLOR if self.enabled else style.TOGGLE_DISABLED_KNOB_COLOR)
-
+    # under the knob, which covers them at the ends
     for text, right in zip(self._hints, (False, True), strict=True):
       if text:
         size = measure_text_cached(self._font_hint, text, 28)
         x = track.x + track.width + KNOB_RADIUS - size.x if right else track.x - KNOB_RADIUS
         rl.draw_text_ex(self._font_hint, text, rl.Vector2(x, self._rect.y + self._rect.height - size.y), 28, 0, style.ITEM_DESC_TEXT_COLOR)
+    rl.draw_circle_v(rl.Vector2(knob_x, center_y), KNOB_RADIUS_PRESSED if self._dragging else KNOB_RADIUS,
+                     style.TOGGLE_KNOB_COLOR if self.enabled else style.TOGGLE_DISABLED_KNOB_COLOR)
 
   def _render_button(self, rect: rl.Rectangle, text: str, enabled: bool, held: bool) -> None:
     enabled = enabled and self.enabled
