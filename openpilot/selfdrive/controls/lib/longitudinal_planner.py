@@ -144,7 +144,9 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       output_a_target = limo_a_target
       a_prev = self.limo.output_last
     elif limo_active:
-      self.limo.reset(float(np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)))
+      limo_a_target = self.limo.stay_out(float(np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)))
+      if limo_a_target is not None:
+        output_a_target = limo_a_target
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0

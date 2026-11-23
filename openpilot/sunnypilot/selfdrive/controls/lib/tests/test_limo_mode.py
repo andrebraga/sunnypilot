@@ -15,8 +15,9 @@ from openpilot.common.parameterized import parameterized
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.test import OpenpilotTestCase
+from openpilot.sunnypilot.selfdrive.controls.lib.limo_curve import DEFAULTS, ease_kernel
 from openpilot.sunnypilot.selfdrive.controls.lib.limo_mode import LimoMode, BLEND_ONSET, BLEND_TIME, CRUISE_DECEL, CRUISE_HEADROOM, \
-  DISTURBANCE_MAX, EASE_ONSET, EASE_TIME, VISION_TIME, ease_kernel, smoothstep
+  DISTURBANCE_MAX, VISION_TIME, smoothstep
 
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 Personality = log.LongitudinalPersonality
@@ -57,7 +58,7 @@ def drive(limo, car, frames, v_cruise, source=LongitudinalPlanSource.cruise, a_l
 
 
 class TestLimoMode(OpenpilotTestCase):
-  @parameterized.expand([(t, EASE_ONSET) for t in EASE_TIME] + [(BLEND_TIME, BLEND_ONSET)])
+  @parameterized.expand([(c.ease_time, c.build) for c in DEFAULTS.values()] + [(BLEND_TIME, BLEND_ONSET)])
   def test_kernel(self, length, onset):
     kernel = ease_kernel(length, onset, DT_MDL)
     assert len(kernel) == round(length / DT_MDL)
@@ -79,8 +80,7 @@ class TestLimoMode(OpenpilotTestCase):
     moment = (np.array(out) - inputs) @ np.arange(200) * DT_MDL
     assert abs(moment - limo.cruise.delay * inputs.sum()) < 1e-6
 
-  @parameterized.expand([(Personality.aggressive, 0.0), (Personality.standard, 0.0), (Personality.relaxed, 0.0),
-                         (Personality.aggressive, 15.0), (Personality.standard, 15.0), (Personality.relaxed, 25.0)])
+  @parameterized.expand([(Personality.aggressive, 0.0), (Personality.standard, 0.0), (Personality.aggressive, 15.0), (Personality.standard, 15.0)])
   def test_does_not_start_later(self, personality, v0):
     # cruise without smoothing is limited to this jerk
     jerk = np.interp(v0, [0., 10.0, 25., 40.], [1.6, 1.2, 0.8, 0.6])

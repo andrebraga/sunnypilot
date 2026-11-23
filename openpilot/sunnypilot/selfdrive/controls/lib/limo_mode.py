@@ -5,6 +5,7 @@ This file is part of sunnypilot and is licensed under the MIT License.
 See the LICENSE.md file in the root directory for more details.
 """
 from functools import wraps
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -14,14 +15,14 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
+from openpilot.sunnypilot.selfdrive.controls.lib.limo_curve import PARAM as CURVES_PARAM, DEFAULTS, RANGES, LimoCurve, curves_from_param, \
+  ease_kernel, get_curve
 
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 
-# Cruise goes through a window that responds as quickly as without one, and then takes its time to get all the way there
-EASE_TIME = (1.0, 1.4, 1.8)  # aggressive, standard, relaxed, s
-EASE_TIME_MAX = max(EASE_TIME)
-EASE_TIME_RATE = 0.3  # s/s, changes must not step the output
-EASE_ONSET = 0.2  # s, where the window peaks
+# Cruise goes through a window with the shape of the curve. So does what the lead and model ask for, as far as that's
+# longer than what they do on their own
+CURVE_RATES = {"strength": 1.0, "build": 0.3, "ease": 0.6}  # 1/s, changes must not step the output
 # Everything goes through one that's just long enough to round off the corners
 BLEND_TIME = 0.2  # s
 BLEND_ONSET = 0.08  # s
@@ -57,31 +58,9 @@ DISTURBANCE_MAX = 0.4  # m/s^2
 DISTURBANCE_MIN_SPEED = 2.5  # m/s
 
 
-def get_ease_time(personality=log.LongitudinalPersonality.standard) -> float:
-  if personality == log.LongitudinalPersonality.relaxed:
-    return EASE_TIME[2]
-  elif personality == log.LongitudinalPersonality.standard:
-    return EASE_TIME[1]
-  elif personality == log.LongitudinalPersonality.aggressive:
-    return EASE_TIME[0]
-  else:
-    raise NotImplementedError("Longitudinal personality not supported")
-
-
 def smoothstep(x: float, start: float, end: float) -> float:
   t = float(np.clip((x - start) / (end - start), 0.0, 1.0))
   return t * t * (3.0 - 2.0 * t)
-
-
-def ease_kernel(length: float, onset: float, dt: float) -> np.ndarray:
-  """
-  Unit area bump that peaks at onset. It has compact support and is infinitely differentiable, so anything filtered by
-  it is too.
-  """
-  x = (np.arange(int(np.ceil(length / dt - 1e-9))) + 0.5) * dt / length
-  x = np.minimum(x, 1.0 - 1e-6) ** (np.log(0.5) / np.log(onset / length))
-  kernel = np.exp(-1.0 / (4.0 * x * (1.0 - x)))
-  return kernel / kernel.sum()
 
 
 def fail_safe(default):
@@ -144,7 +123,7 @@ class LimoMode:
   What it can't do:
   - brake less than the lead and model targets, other than by the blend margins
   - brake more than CRUISE_DECEL on its own
-  - accelerate past ACCEL_MAX or the set speed
+  - accelerate past the strength of the curve or the set speed
   """
   def __init__(self, CP, dt: float = DT_MDL):
     self.params = Params()
@@ -156,9 +135,11 @@ class LimoMode:
     self.active = False
     self.failed = False
 
-    self.ease_time = get_ease_time()
-    self.cruise = Window(EASE_TIME_MAX, dt)
-    self.cruise.set_kernel(ease_kernel(self.ease_time, EASE_ONSET, dt))
+    self.curves = dict(DEFAULTS)
+    self.curve = get_curve(self.curves)
+    self.cruise = Window(RANGES["ease"].max, dt)
+    self.rise = Window(2.0 * (RANGES["build"].max - RANGES["build"].min), dt)
+    self.set_curve_kernels()
     self.blend = Window(BLEND_TIME, dt)
     self.blend.set_kernel(ease_kernel(BLEND_TIME, BLEND_ONSET, dt))
     self.lookahead = self.blend.delay + LEAD_LOOKAHEAD  # how much further ahead to read the lead and model plans
@@ -175,9 +156,23 @@ class LimoMode:
     self.frame += 1
     if self.frame % int(PARAMS_UPDATE_PERIOD / self.dt) == 0:
       self.enabled = self.openpilot_longitudinal and self.params.get_bool("LimoMode")
+      self.curves = curves_from_param(self.params.get(CURVES_PARAM))
+
+  def set_curve_kernels(self) -> None:
+    self.ease_time = self.curve.ease_time
+    self.cruise.set_kernel(ease_kernel(self.ease_time, self.curve.build, self.dt))
+    length = 2.0 * (self.curve.build - RANGES["build"].min)
+    self.rise.set_kernel(ease_kernel(length, length / 2.0, self.dt) if length > 2.0 * self.dt else np.ones(1))
+
+  def limit_rise(self, accel: float) -> float:
+    """Limits how much and how quickly the car accelerates. It only ever takes away from positive targets"""
+    rise = self.rise.update(float(np.clip(accel, 0.0, self.curve.strength)))
+    return accel if accel <= 0.0 else min(accel, rise)
 
   @fail_safe(None)
-  def reset(self, accel: float) -> None:
+  def reset(self, accel: float, rise: bool = True) -> None:
+    if rise:
+      self.rise.reset(max(accel, 0.0))
     self.cruise.reset(accel)
     self.blend.reset(accel)
     self.outputs[:] = accel
@@ -188,10 +183,10 @@ class LimoMode:
   def start_frame(self, v_ego: float, a_ego: float, personality, active: bool) -> None:
     self.v_ego = v_ego
     self.active = active
-    ease_time = get_ease_time(personality)
-    if ease_time != self.ease_time:
-      self.ease_time = float(np.clip(ease_time, self.ease_time - EASE_TIME_RATE * self.dt, self.ease_time + EASE_TIME_RATE * self.dt))
-      self.cruise.set_kernel(ease_kernel(self.ease_time, EASE_ONSET, self.dt))
+    curve = get_curve(self.curves, personality)
+    if curve != self.curve:
+      self.curve = self.curve.towards(curve, CURVE_RATES, self.dt)
+      self.set_curve_kernels()
     if active and v_ego > DISTURBANCE_MIN_SPEED:
       disturbance = float(np.clip(a_ego - self.outputs[-1], -DISTURBANCE_MAX, DISTURBANCE_MAX))
       self.disturbance += (disturbance - self.disturbance) * self.dt / DISTURBANCE_TAU
@@ -231,6 +226,15 @@ class LimoMode:
     return max(distance, 0.0)
 
   @fail_safe(None)
+  def stay_out(self, accel: float) -> float | None:
+    """Not smoothing, other than how it accelerates"""
+    if not np.isfinite(accel):
+      return None
+    output = self.limit_rise(accel)
+    self.reset(output, rise=False)
+    return output
+
+  @fail_safe(None)
   def cruise_target(self, v_cruise: float, source) -> float | None:
     """Unsmoothed cruise target, None when Limo mode has to stay out of it"""
     # the vision controller's target speed moves with the speed of the car and is tuned for the planner's own response
@@ -239,7 +243,7 @@ class LimoMode:
       return None
 
     accel = (v_cruise - self.committed_speed) / CRUISE_TAU
-    target = float(np.clip(accel - self.disturbance, -CRUISE_DECEL, ACCEL_MAX))
+    target = float(np.clip(accel - self.disturbance, -CRUISE_DECEL, self.curve.strength))
     return target if np.isfinite(target) else None
 
   @staticmethod
@@ -252,6 +256,8 @@ class LimoMode:
     Smoothed cruise target. a_limit is the lowest of the lead and model targets, cruise follows it so that it doesn't
     have to be smoothed all over again when it's not limited anymore.
     """
+    # it brakes for itself only, braking for the lead and model is theirs and lets go as soon as they do
+    np.maximum(self.cruise.history, min(target, 0.0), out=self.cruise.history)
     last = self.cruise.value
     target = min(target, a_limit + CRUISE_HEADROOM)
     return self.cruise.update(float(np.clip(target, last - TARGET_STEP, last + TARGET_STEP)))
@@ -274,12 +280,15 @@ class LimoMode:
       return None
 
     self.output_last = float(self.outputs[0])
+    a_ahead = self.limit_rise(min(a_lead_ahead, a_model_ahead))
     a_now = min(a_lead, a_model)
+    if a_now > 0.0:
+      a_now = min(a_now, self.rise.value)
     a_cruise = self.cruise_accel(cruise_target, a_now)
     # it continues from its own targets like without smoothing, and has to know about the smoothed cruise
     self.a_plan = float(np.clip(min(a_cruise, a_lead, a_model), ACCEL_MIN, ACCEL_MAX))
 
-    output = self.blend.update(float(np.clip(min(a_cruise, a_lead_ahead, a_model_ahead), ACCEL_MIN, ACCEL_MAX)))
+    output = self.blend.update(float(np.clip(min(a_cruise, a_ahead), ACCEL_MIN, ACCEL_MAX)))
 
     crawling = smoothstep(self.v_ego, *CRAWL_SPEED)
     if output < a_now < a_cruise:
@@ -300,3 +309,20 @@ class LimoMode:
     self.outputs = np.roll(self.outputs, 1)
     self.outputs[0] = output
     return output, a_cruise
+
+
+def preview(curve: LimoCurve, v_target: float, duration: float) -> tuple[np.ndarray, np.ndarray]:
+  """Speed and acceleration of an ideal car from a stop to v_target on an open road, every DT_MDL"""
+  limo = LimoMode(SimpleNamespace(openpilotLongitudinalControl=True, longitudinalActuatorDelay=0.0))
+  limo.curves = dict.fromkeys(limo.curves, curve)
+  limo.curve = curve
+  limo.set_curve_kernels()
+  n = int(round(duration / limo.dt))
+  speed, accel = np.zeros(n + 1), np.zeros(n + 1)
+  for i in range(n):
+    limo.start_frame(speed[i], accel[i], log.LongitudinalPersonality.standard, True)
+    target = limo.cruise_target(v_target, LongitudinalPlanSource.cruise)
+    plan = limo.plan(target, ACCEL_MAX, ACCEL_MAX, ACCEL_MAX, ACCEL_MAX, np.inf, False) if target is not None else None
+    accel[i + 1] = plan[0] if plan is not None else 0.0
+    speed[i + 1] = max(speed[i] + accel[i + 1] * limo.dt, 0.0)
+  return speed, accel

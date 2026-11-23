@@ -637,7 +637,7 @@
               "key": "LimoMode",
               "widget": "toggle",
               "title": "Limo Mode (Alpha)",
-              "description": "Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. With Smart Cruise Control Map and Speed Limit Assist, starts slowing down earlier for curves and lower speed limits on the map, not harder. Firm braking for a lead or by the driving model, turns slowed by Smart Cruise Control Vision, and crawling speeds aren't smoothed. Driving Personality sets how gradual it is.",
+              "description": "Eases acceleration and braking in and out with a smooth curve, then holds full acceleration until close to the set speed. With Smart Cruise Control Map and Speed Limit Assist, starts slowing down earlier for curves and lower speed limits on the map, not harder. Firm braking for a lead or by the driving model, turns slowed by Smart Cruise Control Vision, and crawling speeds aren't smoothed. Limo Curve on the device sets how it accelerates, for each Driving Personality.",
               "enablement": [
                 {
                   "type": "capability",
