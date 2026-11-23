@@ -289,6 +289,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"RoadNameToggle", {PERSISTENT | BACKUP, BOOL, "0"}},
 
     // Speed Limit
+    {"SpeedLimitAssistAutoConfirm", {PERSISTENT | BACKUP, BOOL, "0"}},
     {"SpeedLimitMode", {PERSISTENT | BACKUP, INT, "1"}},
     {"SpeedLimitOffsetType", {PERSISTENT | BACKUP, INT, "0"}},
     {"SpeedLimitPolicy", {PERSISTENT | BACKUP, INT, "3"}},

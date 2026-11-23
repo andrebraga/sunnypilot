@@ -171,6 +171,14 @@ sections:
             - type: capability
               field: is_sp_release
               equals: true
+    - key: SpeedLimitAssistAutoConfirm
+      widget: toggle
+      title: Follow Limits Without Confirming
+      description: "Assist follows limits below 80 km/h (50 mph), like in town, without asking you to confirm with the cruise buttons. It also speeds up when the limit goes up. Setting the speed yourself overrides it until the next limit."
+      visibility:
+      - type: param
+        key: SpeedLimitMode
+        equals: 3
     - key: SpeedLimitPolicy
       widget: multiple_button
       title: Speed Limit Source

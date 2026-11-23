@@ -14,7 +14,8 @@ from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Mode 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import OffsetType as SpeedLimitOffsetType
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.sunnypilot.widgets import get_highlighted_description
-from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, option_item_sp, simple_button_item_sp, LineSeparatorSP
+from openpilot.system.ui.sunnypilot.widgets.list_view import multiple_button_item_sp, option_item_sp, simple_button_item_sp, toggle_item_sp, \
+  LineSeparatorSP
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.network import NavButton
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -63,6 +64,12 @@ class SpeedLimitSettingsLayout(Widget):
       button_width=380,
     )
 
+    self._auto_confirm = toggle_item_sp(
+      title=lambda: tr("Follow Limits Without Confirming"),
+      description=self._get_auto_confirm_description,
+      param="SpeedLimitAssistAutoConfirm",
+    )
+
     self._source_button = simple_button_item_sp(
       button_text=lambda: tr("Customize Source"),
       button_width=720,
@@ -88,6 +95,7 @@ class SpeedLimitSettingsLayout(Widget):
 
     items = [
       self._speed_limit_mode,
+      self._auto_confirm,
       LineSeparatorSP(40),
       self._source_button,
       LineSeparatorSP(40),
@@ -104,6 +112,12 @@ class SpeedLimitSettingsLayout(Widget):
   @staticmethod
   def _get_mode_description():
     return get_highlighted_description(ui_state.params, "SpeedLimitMode", SPEED_LIMIT_MODE_DESCRIPTIONS)
+
+  @staticmethod
+  def _get_auto_confirm_description():
+    threshold = tr("80 km/h") if ui_state.is_metric else tr("50 mph")
+    return tr("Assist follows limits below {threshold}, like in town, without asking you to confirm with the cruise buttons. " +
+              "It also speeds up when the limit goes up. Setting the speed yourself overrides it until the next limit.").format(threshold=threshold)
 
   @staticmethod
   def _get_offset_description():
@@ -153,6 +167,8 @@ class SpeedLimitSettingsLayout(Widget):
       })
     else:
       self._speed_limit_mode.action_item.set_enabled_buttons(None)
+
+    self._auto_confirm.set_visible(sla_available and speed_limit_mode_param == int(SpeedLimitMode.assist))
 
     offset_type = ui_state.params.get("SpeedLimitOffsetType", return_default=True)
     self._speed_limit_value_offset.set_visible(offset_type != int(SpeedLimitOffsetType.off))

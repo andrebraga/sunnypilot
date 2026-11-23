@@ -11,6 +11,7 @@ from openpilot.common.parameterized import parameterized
 
 from openpilot.cereal import custom
 from opendbc.car.car_helpers import interfaces
+from opendbc.car.hyundai.values import CAR as KIA
 from opendbc.car.rivian.values import CAR as RIVIAN
 from opendbc.car.structs import car
 from opendbc.car.tesla.values import CAR as TESLA
@@ -30,6 +31,7 @@ from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.common.test import OpenpilotTestCase
 
 ButtonEvent = car.CarState.ButtonEvent
+EventNameSP = custom.OnroadEventSP.EventName
 ButtonType = car.CarState.ButtonEvent.Type
 
 SpeedLimitAssistState = custom.LongitudinalPlanSP.SpeedLimit.AssistState
@@ -360,3 +362,61 @@ class TestButtonStateTrackerSLAIntegration(OpenpilotTestCase):
     self.sla.update_buttons(self.tracker.release_toggle)
     time.sleep(CRUISE_BUTTON_CONFIRM_HOLD + 0.1)
     assert not self.sla._get_button_release(req_plus=True, req_minus=False)
+
+
+class TestSpeedLimitAssistAutoConfirm(OpenpilotTestCase):
+  """Following limits below the confirm speed threshold without the driver confirming them"""
+
+  def _make(self, car_name, auto_confirm: bool) -> SpeedLimitAssist:
+    self.params = Params()
+    self.params.put("IsReleaseSpBranch", True, block=True)
+    self.params.put("SpeedLimitMode", int(Mode.assist), block=True)
+    self.params.put_bool("IsMetric", False, block=True)
+    self.params.put("SpeedLimitOffsetType", 0, block=True)
+    self.params.put("SpeedLimitValueOffset", 0, block=True)
+    self.params.put_bool("SpeedLimitAssistAutoConfirm", auto_confirm, block=True)
+    CarInterface = interfaces[car_name]
+    CP = CarInterface.get_non_essential_params(car_name)
+    CP.openpilotLongitudinalControl = True
+    CP.pcmCruise = car_name != KIA.KIA_EV6  # the EV6 with openpilot longitudinal sets its own speed
+    CP_SP = CarInterface.get_non_essential_params_sp(CP, car_name)
+    self.events_sp = EventsSP()
+    return SpeedLimitAssist(CP, CP_SP)
+
+  def _drive(self, sla, seconds: float, limit: float, v_cruise: float, v_ego: float | None = None) -> set:
+    events = set()
+    for _ in range(int(seconds / DT_MDL)):
+      self.events_sp.clear()
+      sla.update(True, False, limit if v_ego is None else v_ego, 0., v_cruise, limit, limit, limit > 0, 0., self.events_sp)
+      events |= set(self.events_sp.names)
+    return events
+
+  @parameterized.expand([(KIA.KIA_EV6,), (DEFAULT_CAR,)])
+  def test_follows_town_limits_without_confirming(self, car_name):
+    sla = self._make(car_name, True)
+    v_cruise = SPEED_LIMITS['freeway']
+    events = self._drive(sla, 3., SPEED_LIMITS['city'], v_cruise)
+    assert sla.state in ACTIVE_STATES and sla.output_v_target == SPEED_LIMITS['city']
+    for limit in (SPEED_LIMITS['residential'], SPEED_LIMITS['city'], SPEED_LIMITS['residential']):
+      events |= self._drive(sla, 2., limit, v_cruise)
+      assert sla.state in ACTIVE_STATES and sla.output_v_target == limit
+    assert EventNameSP.speedLimitPreActive not in events
+
+  @parameterized.expand([(KIA.KIA_EV6,), (DEFAULT_CAR,)])
+  def test_setting_the_speed_still_overrides(self, car_name):
+    sla = self._make(car_name, True)
+    self._drive(sla, 3., SPEED_LIMITS['city'], SPEED_LIMITS['freeway'])
+    assert sla.state in ACTIVE_STATES
+    self._drive(sla, 2., SPEED_LIMITS['city'], SPEED_LIMITS['highway'])
+    assert sla.state == SpeedLimitAssistState.inactive and sla.output_v_target == V_CRUISE_UNSET
+    self._drive(sla, 2., SPEED_LIMITS['residential'], SPEED_LIMITS['highway'])
+    if not sla.pcm_op_long:
+      # the next limit is followed again
+      assert sla.state in ACTIVE_STATES and sla.output_v_target == SPEED_LIMITS['residential']
+
+  def test_off_still_asks(self):
+    sla = self._make(KIA.KIA_EV6, False)
+    assert not sla.pcm_op_long
+    events = self._drive(sla, 3., SPEED_LIMITS['city'], SPEED_LIMITS['freeway'])
+    assert sla.state == SpeedLimitAssistState.preActive and EventNameSP.speedLimitPreActive in events
+    assert sla.output_v_target == V_CRUISE_UNSET
