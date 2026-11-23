@@ -144,6 +144,7 @@ class LimoMode:
     self.curve = get_curve(self.curves)
     self.cruise = Window(RANGES["ease"].max, dt)
     self.rise = Window(2.0 * (RANGES["build"].max - RANGES["build"].min), dt)
+    self.cruise_own = np.zeros_like(self.cruise.history)  # the braking cruise wanted for itself, for each of its inputs
     self.set_curve_kernels()
     self.blend = Window(BLEND_TIME, dt)
     self.blend.set_kernel(ease_kernel(BLEND_TIME, BLEND_ONSET, dt))
@@ -179,6 +180,7 @@ class LimoMode:
     if rise:
       self.rise.reset(max(accel, 0.0))
     self.cruise.reset(accel)
+    self.cruise_own[:] = min(accel, 0.0)
     self.blend.reset(accel)
     self.outputs[:] = accel
     self.a_plan = accel
@@ -267,11 +269,15 @@ class LimoMode:
     Smoothed cruise target. a_limit is the lowest of the lead and model targets, cruise follows it so that it doesn't
     have to be smoothed all over again when it's not limited anymore.
     """
-    # it brakes for itself only, braking for the lead and model is theirs and lets go as soon as they do
-    np.maximum(self.cruise.history, min(target, 0.0), out=self.cruise.history)
+    # Braking it followed from the lead and model is theirs, it's gone as soon as cruise wouldn't brake that hard for
+    # itself. Its own braking eases out like anything else
+    np.maximum(self.cruise.history, self.cruise_own, out=self.cruise.history)
     last = self.cruise.value
-    target = min(target, a_limit + CRUISE_HEADROOM)
-    return self.cruise.update(clip(target, last - TARGET_STEP, last + TARGET_STEP))
+    own = clip(target, last - TARGET_STEP, last + TARGET_STEP)
+    output = self.cruise.update(clip(min(target, a_limit + CRUISE_HEADROOM), last - TARGET_STEP, last + TARGET_STEP))
+    self.cruise_own[1:] = self.cruise_own[:-1]
+    self.cruise_own[0] = min(own, 0.0)
+    return output
 
   @staticmethod
   def _limit(output: float, a_now: float, margin: list[float], follow: float = 0.0) -> float:

@@ -24,7 +24,10 @@ TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
 PASSED_DISTANCE = 30.0  # meters past a target to forget it
-GPS_AGE_MAX = 1.5  # seconds
+GPS_AGE_MAX = 2.0  # seconds
+GPS_LATENCY = {'gpsLocation': 0.630, 'gpsLocationExternal': 0.095}  # s, from fix to message, as gps_fuser has it
+FUSED_SERVICE = "gpsLocationSP"
+FUSED_MAX_AGE = 0.5  # s
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
                      # reach the target velocity when inaccuracies in the distance modeling logic would cause overshoot.
                      # The value is multiplied against the target velocity to determine the additional distance. This is
@@ -109,8 +112,27 @@ class SmartCruiseControlMap:
     if self.frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
       self.enabled = self.params.get_bool("SmartCruiseControlMap")
 
+  def get_fused_location(self, sm: messaging.SubMaster):
+    """The fused location, None when there isn't a fresh one"""
+    if FUSED_SERVICE not in sm.recv_time:
+      return None
+    fused = sm[FUSED_SERVICE]
+    if not (fused.fused and fused.hasFix) or time.monotonic() - sm.recv_time[FUSED_SERVICE] > FUSED_MAX_AGE:
+      return None
+    return fused
+
   def update_calculations(self, sm: messaging.SubMaster) -> None:
+    limo = self.limo is not None and self.limo.enabled
     gps = sm[self.gps_location_service]
+    # how long the car has driven on since the position: the raw fix is once a second and late
+    gps_age = 0.
+    if limo:
+      fused = self.get_fused_location(sm)
+      if fused is not None:
+        gps = fused
+      else:
+        age = time.monotonic() - sm.recv_time[self.gps_location_service] + GPS_LATENCY.get(self.gps_location_service, 0.)
+        gps_age = min(max(age, 0.), GPS_AGE_MAX)
     self.last_position = Coordinate(gps.latitude, gps.longitude)
     lat = self.last_position.latitude
     lon = self.last_position.longitude
@@ -139,10 +161,6 @@ class SmartCruiseControlMap:
     forward_points = self.target_velocities[min_idx:]
     forward_distances = distances[min_idx:]
 
-    gps_age = 0.
-    if self.limo is not None and self.limo.enabled:
-      gps_age = min(max(time.monotonic() - sm.recv_time[self.gps_location_service], 0.), GPS_AGE_MAX)
-
     # find velocities that we are within the distance we need to adjust for
     valid_velocities = []
     for i in range(len(forward_points)):
@@ -156,7 +174,6 @@ class SmartCruiseControlMap:
       d = forward_distances[i]
 
       if self.limo is not None and self.limo.enabled:
-        # the position is only updated once a second
         if d - self.v_ego * gps_age < self.limo.approach_distance(tv) + tv * TARGET_OFFSET:
           valid_velocities.append((float(tv), tlat, tlon))
         continue
