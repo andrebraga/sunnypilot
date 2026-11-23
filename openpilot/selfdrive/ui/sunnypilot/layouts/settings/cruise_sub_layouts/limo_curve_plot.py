@@ -35,6 +35,27 @@ SERIES = rl.Color(0x39, 0x87, 0xE5, 255)
 REFERENCE = rl.Color(140, 139, 134, 255)
 TITLE_SIZE = 32
 TICK_SIZE = 28
+MORPH_TIME = 0.35  # s, from one curve to the next
+
+
+class Morph:
+  """Glides from what is shown to what should be shown, along a smootherstep in time"""
+  def __init__(self):
+    self.start: np.ndarray | None = None
+    self.target: np.ndarray | None = None
+    self.t0 = 0.0
+
+  def update(self, target: np.ndarray, now: float) -> np.ndarray:
+    if self.target is None or self.start is None or target.shape != self.target.shape:
+      self.start = self.target = target
+    elif target is not self.target and not np.array_equal(target, self.target):
+      self.start, self.target, self.t0 = self.value(now), target, now
+    return self.value(now)
+
+  def value(self, now: float) -> np.ndarray:
+    assert self.start is not None and self.target is not None
+    x = min(max((now - self.t0) / MORPH_TIME, 0.0), 1.0)
+    return self.start + (self.target - self.start) * (x * x * x * (x * (6.0 * x - 15.0) + 10.0))
 
 
 class Launch:
@@ -48,6 +69,7 @@ class Launch:
     self.time = float(self.t[there[0]]) if len(there) else DURATION
     self.strength = float(self.accel.max())
     self.jerk = float(np.abs(np.diff(self.accel)).max() / DT_MDL)
+    self.morphable = np.stack([self.accel, self.speed])
 
 
 class LaunchWorker:
@@ -99,6 +121,10 @@ class LimoCurvePlot(Widget):
     self._launch: Launch | None = None
     self._reference: Launch | None = None
     self._t_max = T_MIN
+    self._morphs = {key: Morph() for key in ("curve", "reference", "t_max")}
+    self._shown: dict[str, np.ndarray] = {}
+    self._t_shown = T_MIN
+    self._clock: Callable[[], float] = rl.get_time
     self._font = gui_app.font(FontWeight.MEDIUM)
     self._font_tick = gui_app.font(FontWeight.NORMAL)
 
@@ -111,6 +137,12 @@ class LimoCurvePlot(Widget):
     launches = [launch for launch in (self._launch, self._reference) if launch is not None]
     if launches:
       self._t_max = min(max(T_MIN, 5.0 * math.ceil((max(launch.time for launch in launches) + 1.0) / 5.0)), DURATION)
+
+    now = self._clock()
+    for key, launch in (("curve", self._launch), ("reference", self._reference)):
+      if launch is not None:
+        self._shown[key] = self._morphs[key].update(launch.morphable, now)
+    self._t_shown = float(self._morphs["t_max"].update(np.array([self._t_max]), now)[0])
 
   def _text(self, text: str, x: float, y: float, size: int, color: rl.Color, align: float = 0.0, medium: bool = False) -> float:
     font = self._font if medium else self._font_tick
@@ -128,8 +160,8 @@ class LimoCurvePlot(Widget):
     height = rect.height - stats_height
     self._render_stats(rl.Rectangle(rect.x, rect.y, rect.width, stats_height), f"0–{target} {unit}")
     y = rect.y + stats_height
-    self._render_chart(rl.Rectangle(rect.x, y, width, height), tr("Acceleration") + ", m/s^2", lambda launch: launch.accel, (0.0, 1.0, 2.0), 2.2)
-    self._render_chart(rl.Rectangle(rect.x + width + gap, y, width, height), tr("Speed") + f", {unit}", lambda launch: launch.speed * scale,
+    self._render_chart(rl.Rectangle(rect.x, y, width, height), tr("Acceleration") + ", m/s^2", lambda shown: shown[0], (0.0, 1.0, 2.0), 2.2)
+    self._render_chart(rl.Rectangle(rect.x + width + gap, y, width, height), tr("Speed") + f", {unit}", lambda shown: shown[1] * scale,
                        tuple(target * f for f in (0.0, 0.5, 1.0)), target * 1.1)
 
   def _render_stats(self, rect: rl.Rectangle, launch_name: str) -> None:
@@ -158,21 +190,21 @@ class LimoCurvePlot(Widget):
     plot = rl.Rectangle(rect.x + 56, rect.y + 52, rect.width - 56 - 24, rect.height - 52 - 44)
 
     def to_xy(t, v):
-      return plot.x + t / self._t_max * plot.width, plot.y + plot.height * (1.0 - v / y_max)
+      return plot.x + t / self._t_shown * plot.width, plot.y + plot.height * (1.0 - v / y_max)
 
     for tick in ticks:
       _, y = to_xy(0.0, tick)
       rl.draw_line_ex(rl.Vector2(plot.x, y), rl.Vector2(plot.x + plot.width, y), 2, AXIS if tick == 0.0 else GRID)
       self._text(f"{tick:g}", plot.x - 14, y - TICK_SIZE / 2, TICK_SIZE, INK_MUTED, align=1.0)
-    for i in range(int(self._t_max // 5) + 1):
+    for i in range(int(self._t_shown // 5) + 1):
       x, y = to_xy(5.0 * i, 0.0)
       self._text(f"{5 * i} s", x, y + 8, TICK_SIZE, INK_MUTED, align=0.5 if i else 0.0)
 
-    for launch, color, dashed in ((self._reference, REFERENCE, True), (self._launch, SERIES, False)):
-      if launch is None:
-        continue
-      n = int(self._t_max / DT_MDL) + 1
-      self._line([to_xy(t, v) for t, v in zip(launch.t[:n:2], values(launch)[:n:2], strict=True)], color, dashed)
+    n = int(self._t_shown / DT_MDL) + 1
+    t = np.arange(n) * DT_MDL
+    for key, color, dashed in (("reference", REFERENCE, True), ("curve", SERIES, False)):
+      if key in self._shown:
+        self._line([to_xy(x, v) for x, v in zip(t[::2], values(self._shown[key])[:n:2], strict=False)], color, dashed)
 
   @staticmethod
   def _line(points: list[tuple[float, float]], color: rl.Color, dashed: bool) -> None:
