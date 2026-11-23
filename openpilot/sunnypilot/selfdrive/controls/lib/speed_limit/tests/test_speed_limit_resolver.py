@@ -6,6 +6,9 @@ See the LICENSE.md file in the root directory for more details.
 """
 import random
 import time
+from types import SimpleNamespace
+
+import numpy as np
 
 from openpilot.common.constants import CV
 from openpilot.common.parameterized import parameterized
@@ -14,7 +17,7 @@ from openpilot.cereal import custom
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit import LIMIT_MAX_MAP_DATA_AGE
 
 from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.speed_limit_resolver import SpeedLimitResolver, ALL_SOURCES
-from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import Policy
+from openpilot.sunnypilot.selfdrive.controls.lib.speed_limit.common import OffsetType, Policy
 from openpilot.common.test import OpenpilotTestCase
 
 SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
@@ -166,3 +169,63 @@ class TestSpeedLimitResolverValidation(OpenpilotTestCase):
     assert resolver.source == SpeedLimitSource.map
     self.assertAlmostEqual(resolver.speed_limit, limit_kph * CV.KPH_TO_MS, places=5)
     self.assertAlmostEqual(resolver.distance, distance, delta=0.1)
+
+  def _limo_resolver(self, resolver_class, mocker, limit_kph, ahead_kph):
+    resolver = resolver_class()
+    resolver.policy = Policy.map_data_only
+    resolver.limo = SimpleNamespace(enabled=True, v_target=None)
+    resolver.limo_distance = 150.
+
+    def approach_distance(v_target):
+      resolver.limo.v_target = v_target
+      return resolver.limo_distance
+    resolver.limo.approach_distance = approach_distance
+
+    sm_mock = setup_sm_mock(mocker)
+    live_map_data = sm_mock['liveMapDataSP']
+    live_map_data.speedLimit = limit_kph * CV.KPH_TO_MS
+    live_map_data.speedLimitAhead = ahead_kph * CV.KPH_TO_MS
+    live_map_data.speedLimitAheadValid = True
+    return resolver, sm_mock, live_map_data
+
+  def test_limo_switches_once(self, resolver_class, mocker):
+    resolver, sm_mock, live_map_data = self._limo_resolver(resolver_class, mocker, 80, 50)
+    rng = np.random.default_rng(0)
+    limits = []
+    for distance in np.arange(400., 0., -1.):
+      # gets shorter as the car slows down, and the position jumps around
+      resolver.limo_distance = min(150., distance * 0.95)
+      live_map_data.speedLimitAheadDistance = max(distance + rng.uniform(-10., 10.), 0.)
+      sm_mock.recv_time['liveMapDataSP'] = time.monotonic()
+      resolver.update((50. + 30. * min(distance / 150., 1.)) * CV.KPH_TO_MS, sm_mock)
+      limits.append(resolver.speed_limit)
+    assert np.count_nonzero(np.diff(limits)) == 1
+
+  def test_limo_higher_limit_ahead(self, resolver_class, mocker):
+    resolver, sm_mock, live_map_data = self._limo_resolver(resolver_class, mocker, 50, 80)
+    for distance in np.arange(400., 0., -1.):
+      live_map_data.speedLimitAheadDistance = distance
+      sm_mock.recv_time['liveMapDataSP'] = time.monotonic()
+      resolver.update(50. * CV.KPH_TO_MS, sm_mock)
+      self.assertAlmostEqual(resolver.speed_limit, 50 * CV.KPH_TO_MS, places=5)
+
+  def test_limo_next_limit_starts_over(self, resolver_class, mocker):
+    resolver, sm_mock, live_map_data = self._limo_resolver(resolver_class, mocker, 80, 50)
+    live_map_data.speedLimitAheadDistance = 100.
+    resolver.update(80 * CV.KPH_TO_MS, sm_mock)
+    self.assertAlmostEqual(resolver.speed_limit, 50 * CV.KPH_TO_MS, places=5)
+
+    # passed it, the same one again further ahead
+    live_map_data.speedLimit, live_map_data.speedLimitAheadDistance = 50 * CV.KPH_TO_MS, 170.
+    resolver.update(50 * CV.KPH_TO_MS, sm_mock)
+    live_map_data.speedLimit = 80 * CV.KPH_TO_MS
+    resolver.update(80 * CV.KPH_TO_MS, sm_mock)
+    self.assertAlmostEqual(resolver.speed_limit, 80 * CV.KPH_TO_MS, places=5)
+
+  def test_limo_offset(self, resolver_class, mocker):
+    resolver, sm_mock, live_map_data = self._limo_resolver(resolver_class, mocker, 80, 50)
+    resolver.frame = 1
+    resolver.offset_type, resolver.offset_value = OffsetType.percentage, -10
+    live_map_data.speedLimitAheadDistance = 100.
+    resolver.update(80 * CV.KPH_TO_MS, sm_mock)
+    self.assertAlmostEqual(resolver.limo.v_target, 45 * CV.KPH_TO_MS, places=5)

@@ -72,4 +72,25 @@ class TestSmartCruiseControlMap(OpenpilotTestCase):
 
     self.assertAlmostEqual(self.scc_m.v_target, 24.0, delta=24.0 * 1e-6)
 
+  def test_limo_mode_holds_then_forgets_target(self):
+    target_lon = (200.0 / R) * (180.0 / math.pi)
+    self.mem_params.put("MapTargetVelocities", json.dumps([{"latitude": 0.0, "longitude": target_lon, "velocity": 15.0}]), block=True)
+    self.scc_m.limo = SimpleNamespace(enabled=True, approach_distance=lambda v_target: 250.0)
+
+    def drive_to(x, v_ego):
+      self.sm.__getitem__.return_value = SimpleNamespace(latitude=0.0, longitude=(x / R) * (180.0 / math.pi))
+      self.scc_m.update(self.sm, True, False, v_ego, 0.0, 30.0)
+
+    drive_to(0.0, 25.0)
+    assert self.scc_m.v_target == 15.0
+    # slower than the target before its place
+    drive_to(150.0, 14.5)
+    assert self.scc_m.v_target == 15.0 and 30.0 < self.scc_m.target_distance < 40.0
+    # the map data is stuck, it has to let go once it's passed
+    self.scc_m.limo.approach_distance = lambda v_target: 0.0
+    for x in range(200, 260, 5):
+      drive_to(float(x), 14.5)
+    drive_to(260.0, 14.5)
+    assert self.scc_m.v_target != 15.0 and self.scc_m.target_distance == 0.0
+
   # TODO-SP: mock data from modelV2 to test other states

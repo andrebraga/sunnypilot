@@ -20,6 +20,8 @@ SpeedLimitSource = custom.LongitudinalPlanSP.SpeedLimit.Source
 
 ALL_SOURCES = tuple(SpeedLimitSource.schema.enumerants.values())
 
+LIMO_HOLD_MARGIN = 30.  # m
+
 
 class SpeedLimitResolver:
   limit_solutions: dict[custom.LongitudinalPlanSP.SpeedLimit.Source, float]
@@ -36,6 +38,8 @@ class SpeedLimitResolver:
   def __init__(self):
     self.params = Params()
     self.limo = None
+    self.limo_hold_limit = 0.
+    self.limo_hold_distance = 0.
     self.frame = -1
 
     self._gps_location_service = get_gps_location_service(self.params)
@@ -97,13 +101,13 @@ class SpeedLimitResolver:
       self.offset_type = self.params.get("SpeedLimitOffsetType", return_default=True)
       self.offset_value = self.params.get("SpeedLimitValueOffset", return_default=True)
 
-  def _get_speed_limit_offset(self) -> float:
+  def _get_speed_limit_offset(self, speed_limit: float) -> float:
     if self.offset_type == OffsetType.off:
       return 0
     elif self.offset_type == OffsetType.fixed:
       return float(self.offset_value * (CV.KPH_TO_MS if self.is_metric else CV.MPH_TO_MS))
     elif self.offset_type == OffsetType.percentage:
-      return float(self.offset_value * 0.01 * self.speed_limit)
+      return float(self.offset_value * 0.01 * speed_limit)
     else:
       raise NotImplementedError("Offset not supported")
 
@@ -145,16 +149,35 @@ class SpeedLimitResolver:
 
     # From the current limit too, so the switch holds once the car has slowed below the limit ahead
     v_start = max(self.v_ego, speed_limit)
+    adapt_distance = 0.
     if 0. < next_speed_limit < v_start:
       adapt_time = (next_speed_limit - v_start) / LIMIT_ADAPT_ACC
       adapt_distance = v_start * adapt_time + 0.5 * LIMIT_ADAPT_ACC * adapt_time ** 2
-      if self.limo is not None and self.limo.enabled:
-        # for holding it too, this doesn't get shorter as the car slows down
-        adapt_distance = max(adapt_distance, self.limo.approach_distance(next_speed_limit))
 
-      if distance_to_speed_limit_ahead <= adapt_distance:
-        self.limit_solutions[SpeedLimitSource.map] = next_speed_limit
-        self.distance_solutions[SpeedLimitSource.map] = distance_to_speed_limit_ahead
+    if self.limo is not None and self.limo.enabled:
+      adapt_distance = self._limo_adapt_distance(adapt_distance, speed_limit, next_speed_limit, distance_to_speed_limit_ahead)
+
+    if next_speed_limit > 0. and adapt_distance > 0. and distance_to_speed_limit_ahead <= adapt_distance:
+      self.limit_solutions[SpeedLimitSource.map] = next_speed_limit
+      self.distance_solutions[SpeedLimitSource.map] = distance_to_speed_limit_ahead
+
+  def _limo_adapt_distance(self, adapt_distance: float, speed_limit: float, next_speed_limit: float, distance: float) -> float:
+    if next_speed_limit <= 0.:
+      return adapt_distance
+
+    # Limo mode's distance gets shorter as the car slows down, and the map's jumps around. Once switched, stay
+    if next_speed_limit != self.limo_hold_limit or speed_limit == self.limo_hold_limit or distance > self.limo_hold_distance:
+      self.limo_hold_limit = 0.
+      self.limo_hold_distance = 0.
+
+    # only for lower limits
+    if self.limo_hold_limit == 0. and next_speed_limit < max(self.v_ego, speed_limit):
+      v_target = next_speed_limit + self._get_speed_limit_offset(next_speed_limit)
+      adapt_distance = max(adapt_distance, self.limo.approach_distance(v_target))
+      if distance <= adapt_distance:
+        self.limo_hold_limit = next_speed_limit
+        self.limo_hold_distance = adapt_distance + LIMO_HOLD_MARGIN
+    return max(adapt_distance, self.limo_hold_distance)
 
   def _get_source_solution_according_to_policy(self) -> custom.LongitudinalPlanSP.SpeedLimit.Source:
     sources_for_policy = self._policy_to_sources_map[Policy(self.policy)]
@@ -188,7 +211,7 @@ class SpeedLimitResolver:
     self.update_params()
 
     self.speed_limit, self.distance, self.source = self._resolve_limit_sources(sm)
-    self.speed_limit_offset = self._get_speed_limit_offset()
+    self.speed_limit_offset = self._get_speed_limit_offset(self.speed_limit)
 
     self.update_speed_limit_states()
 

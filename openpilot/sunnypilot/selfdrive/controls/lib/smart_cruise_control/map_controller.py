@@ -22,6 +22,7 @@ TO_RADIANS = math.pi / 180
 TO_DEGREES = 180 / math.pi
 TARGET_JERK = -0.6  # m/s^3 There's some jounce limits that are not consistent so we're fudging this some
 TARGET_ACCEL = -1.2  # m/s^2 should match up with the long planner limit
+PASSED_DISTANCE = 30.0  # meters past a target to forget it
 TARGET_OFFSET = 1.0  # seconds - This controls how soon before the curve you reach the target velocity. It also helps
                      # reach the target velocity when inaccuracies in the distance modeling logic would cause overshoot.
                      # The value is multiplied against the target velocity to determine the additional distance. This is
@@ -76,6 +77,8 @@ class SmartCruiseControlMap:
   def __init__(self):
     self.params = Params()
     self.limo = None
+    self.closest_target = (0., 0.)
+    self.closest_distance = math.inf
     self.mem_params = Params("/dev/shm/params") if platform.system() != "Darwin" else self.params
     self.enabled = self.params.get_bool("SmartCruiseControlMap")
     self.long_enabled = False
@@ -217,10 +220,22 @@ class SmartCruiseControlMap:
 
   def update_target_distance(self) -> None:
     self.target_distance = 0.
-    if self.target_lat != 0 or self.target_lon != 0:
+    target = (self.target_lat, self.target_lon)
+    if target != self.closest_target:
+      self.closest_target = target
+      self.closest_distance = math.inf
+
+    if target != (0, 0):
       d = distance_to_point(self.last_position.latitude * TO_RADIANS, self.last_position.longitude * TO_RADIANS,
                             self.target_lat * TO_RADIANS, self.target_lon * TO_RADIANS)
       self.target_distance = max(d - self.v_target * TARGET_OFFSET, 0.)
+
+      # it's held until its place is reached, but not any longer when the map data gets stuck
+      self.closest_distance = min(self.closest_distance, d)
+      if self.limo is not None and self.limo.enabled and d > self.closest_distance + PASSED_DISTANCE:
+        self.v_target = 0.0
+        self.target_lat = 0.0
+        self.target_lon = 0.0
 
   def _update_state_machine(self) -> tuple[bool, bool]:
     # ENABLED, TURNING

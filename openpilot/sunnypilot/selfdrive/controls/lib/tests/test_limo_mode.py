@@ -15,8 +15,8 @@ from openpilot.common.parameterized import parameterized
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.test import OpenpilotTestCase
-from openpilot.sunnypilot.selfdrive.controls.lib.limo_mode import LimoMode, BLEND_ONSET, BLEND_TIME, CRUISE_HEADROOM, EASE_ONSET, EASE_TIME, \
-  ease_kernel, smoothstep
+from openpilot.sunnypilot.selfdrive.controls.lib.limo_mode import LimoMode, BLEND_ONSET, BLEND_TIME, CRUISE_BRAKE_MAX, CRUISE_HEADROOM, \
+  DISTURBANCE_MAX, EASE_ONSET, EASE_TIME, VISION_TIME, ease_kernel, smoothstep
 
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
 Personality = log.LongitudinalPersonality
@@ -49,10 +49,8 @@ def drive(limo, car, frames, v_cruise, source=LongitudinalPlanSource.cruise, dis
   for _ in range(frames):
     limo.start_frame(car.v, car.a, personality, True)
     a_lead_now = ACCEL_MAX if a_lead is None else a_lead
-    a_cruise = limo.cruise_target(v_cruise, source, 0.0 if distance is None else max(distance - car.x, 0.0))
-    a_cruise = limo.cruise_accel(a_cruise, min(a_lead_now, a_model))
-    accel = limo.update(min(a_cruise, a_lead_now, a_model), a_cruise, a_lead, a_model, 50.0 if a_lead is not None else np.inf, False)
-    limo.update_plan(a_cruise, a_lead_now, a_model)
+    cruise_target = limo.cruise_target(v_cruise, source, 0.0 if distance is None else max(distance - car.x, 0.0))
+    accel, _ = limo.plan(cruise_target, a_lead_now, a_model, a_lead_now, a_model, 50.0 if a_lead is not None else np.inf, False)
     car.step(accel)
     out.append(accel)
   return np.array(out)
@@ -147,7 +145,7 @@ class TestLimoMode(OpenpilotTestCase):
     out = drive(limo, car, 60, 45.0)
     assert out[-1] > 0.99 * ACCEL_MAX
 
-  @parameterized.expand([(-0.5,), (-0.2,), (0.2,), (0.5,)])
+  @parameterized.expand([(-0.3,), (-0.15,), (0.15,), (0.3,)])
   def test_no_steady_error_on_hills(self, grade):
     limo, car = make_limo(), Car(20.0, grade)
     drive(limo, car, 60 * 20, 20.0)
@@ -179,54 +177,6 @@ class TestLimoMode(OpenpilotTestCase):
     limo, car = make_limo(), Car(30.0)
     assert drive(limo, car, 600, 20.0).min() > -0.55
 
-  @parameterized.expand([(-1.0,), (-2.0,), (ACCEL_MIN,)])
-  def test_hard_lead_braking_is_immediate(self, a_lead):
-    limo, car = make_limo(), Car(25.0)
-    drive(limo, car, 200, 30.0)
-    assert drive(limo, car, 1, 30.0, a_lead=a_lead)[0] <= a_lead + 1e-6
-
-  def test_hard_model_braking_is_immediate(self):
-    limo, car = make_limo(), Car(25.0)
-    drive(limo, car, 200, 25.0)
-    assert drive(limo, car, 1, 25.0, a_model=-2.5)[0] <= -2.5 + 1e-6
-
-  def test_fcw_is_immediate(self):
-    limo, car = make_limo(), Car(25.0)
-    drive(limo, car, 200, 25.0)
-    limo.start_frame(car.v, car.a, Personality.standard, True)
-    assert limo.update(-0.25, 0.0, -0.25, 1.0, 50.0, True) <= -0.25 + 1e-6
-
-  def test_never_brakes_less_than_lead_when_crawling(self):
-    limo, car = make_limo(), Car(1.0)
-    drive(limo, car, 100, 1.0)
-    assert drive(limo, car, 1, 1.0, a_lead=-0.2)[0] <= -0.2 + 1e-6
-
-  @parameterized.expand([(3.0, -0.05, -0.4), (6.0, -0.05, -0.05), (3.0, 0.2, 0.2)])
-  def test_stops_rolling_close_to_the_lead(self, distance, a_lead, expected):
-    limo = make_limo()
-    for _ in range(40):
-      limo.start_frame(0.3, 0.0, Personality.standard, True)
-      a_cruise = limo.cruise_accel(ACCEL_MAX, a_lead)
-      a = limo.update(min(a_cruise, a_lead), a_cruise, a_lead, ACCEL_MAX, distance, False)
-    assert abs(a - expected) < 1e-3
-
-  def test_output_stays_in_limits(self):
-    limo = make_limo()
-    rng = np.random.default_rng(0)
-    for _ in range(500):
-      limo.start_frame(20.0, rng.uniform(-6, 6), Personality.standard, True)
-      a_cruise = limo.cruise_accel(rng.uniform(-10, 10), rng.uniform(-10, 10))
-      a = limo.update(rng.uniform(-10, 10), a_cruise, rng.uniform(-10, 10), rng.uniform(-10, 10), 10.0, False)
-      assert ACCEL_MIN <= a <= ACCEL_MAX
-
-  def test_nan_target(self):
-    limo, car = make_limo(), Car(20.0)
-    drive(limo, car, 20, 20.0)
-    limo.start_frame(20.0, 0.0, Personality.standard, True)
-    assert np.isfinite(limo.cruise_accel(float("nan"), 2.0))
-    assert np.isfinite(limo.update(float("nan"), 0.0, None, 2.0, np.inf, False))
-    assert np.isfinite(drive(limo, car, 50, 20.0)).all() and np.isfinite(limo.a_plan)
-
   def test_model_lookahead_only_adds_braking(self):
     assert LimoMode.model_accel(0.5, 1.8, 0.8) == 0.5
     assert LimoMode.model_accel(0.5, 0.2, 0.9) == 0.5
@@ -239,11 +189,119 @@ class TestLimoMode(OpenpilotTestCase):
     out = np.append(out, drive(limo, car, 60, 30.0, personality=Personality.aggressive))
     assert np.abs(np.diff(out)).max() / DT_MDL < 4.0
 
+  def test_never_brakes_less_than_asked(self):
+    rng = np.random.default_rng(0)
+    for _ in range(20):
+      limo = make_limo()
+      v_ego = rng.uniform(0.0, 35.0)
+      limo.reset(rng.uniform(-2.0, 2.0))
+      a_lead, a_model, has_lead = 1.0, 1.0, True
+      for _ in range(200):
+        if rng.random() < 0.1:
+          a_lead, a_model = rng.uniform(-4.0, 3.0, 2)
+          has_lead = rng.random() < 0.7
+        v_ego = max(v_ego + rng.uniform(-0.3, 0.3), 0.0)
+        limo.start_frame(v_ego, rng.uniform(-3.0, 2.0), Personality.standard, True)
+        target = limo.cruise_target(rng.uniform(0.0, 40.0), LongitudinalPlanSource.cruise, 0.0)
+        ahead = rng.uniform(-4.0, 3.0, 2)
+        accel, _ = limo.plan(target, a_lead, a_model, *ahead, rng.uniform(1.0, 60.0) if has_lead else np.inf, rng.random() < 0.05)
+        assert ACCEL_MIN <= accel <= ACCEL_MAX
+        asked = max(min(a_lead, a_model), ACCEL_MIN)
+        if asked <= -0.5:
+          assert accel <= asked + 1e-6
+        elif asked <= 0.0:
+          assert accel <= asked + 0.2 + 1e-6
+        else:
+          assert accel <= asked + 0.5 + 1e-6
+
+  def test_braking_is_immediate(self):
+    for kwargs in ({"a_lead": -1.0}, {"a_lead": ACCEL_MIN}, {"a_model": -0.6}, {"a_model": -2.5}):
+      limo, car = make_limo(), Car(25.0)
+      drive(limo, car, 200, 30.0)
+      assert drive(limo, car, 1, 30.0, **kwargs)[0] <= min(kwargs.values()) + 1e-6
+
+  def test_cruise_braking_is_bounded(self):
+    for source, distance in ((LongitudinalPlanSource.cruise, None), (LongitudinalPlanSource.sccMap, 10.0), (LongitudinalPlanSource.speedLimitAssist, 10.0)):
+      limo, car = make_limo(), Car(35.0, grade=0.8)
+      assert drive(limo, car, 200, 5.0, source, distance).min() >= -CRUISE_BRAKE_MAX - 1e-6
+
+  def test_disturbance_is_bounded(self):
+    limo = make_limo()
+    for _ in range(400):
+      limo.start_frame(20.0, -3.5, Personality.standard, True)
+    assert abs(limo.disturbance) <= DISTURBANCE_MAX
+
+  def test_stays_out_of_vision_turns(self):
+    limo = make_limo()
+    limo.start_frame(15.0, 0.0, Personality.standard, True)
+    assert limo.cruise_target(10.0, LongitudinalPlanSource.sccVision, 0.0) is None
+    for _ in range(int(VISION_TIME / DT_MDL) - 1):
+      assert limo.cruise_target(10.0, LongitudinalPlanSource.cruise, 0.0) is None
+    for _ in range(2):
+      target = limo.cruise_target(10.0, LongitudinalPlanSource.cruise, 0.0)
+    assert target is not None
+
+  @parameterized.expand([(i, bad) for i in range(5) for bad in (float("nan"), float("inf"))])
+  def test_bad_input_falls_back(self, index, bad):
+    limo, car = make_limo(), Car(20.0)
+    drive(limo, car, 20, 20.0)
+    args = [1.0, 1.0, 1.0, 1.0, 1.0]
+    args[index] = bad
+    limo.start_frame(20.0, 0.0, Personality.standard, True)
+    assert limo.plan(*args, np.inf, False) is None
+    # and it doesn't stick
+    assert np.isfinite(drive(limo, car, 50, 20.0)).all() and not limo.failed
+
+  def test_failure_is_latched(self):
+    params = Params()
+    params.put_bool("LimoMode", True, block=True)
+    limo, car = make_limo(), Car(20.0)
+    drive(limo, car, 20, 20.0)
+    limo.cruise = None
+    assert limo.plan(1.0, 1.0, 1.0, 1.0, 1.0, np.inf, False) is None
+    assert limo.failed and not limo.enabled
+    limo.frame = -1
+    limo.update_params()
+    assert not limo.enabled
+    assert limo.approach_distance(10.0) == 0.0
+    assert limo.cruise_target(10.0, LongitudinalPlanSource.cruise, 0.0) is None
+
+  @parameterized.expand([("cruise",), ("blend",), ("outputs",), ("params",)])
+  def test_no_failure_gets_out(self, name):
+    limo, car = make_limo(), Car(20.0)
+    drive(limo, car, 20, 20.0)
+    setattr(limo, name, None)
+    for _ in range(3 * int(1.0 / DT_MDL)):
+      limo.update_params()
+      limo.start_frame(20.0, 0.0, log.LongitudinalPersonality.standard, True)
+      assert limo.approach_distance(10.0) >= 0.0
+      limo.cruise_target(20.0, LongitudinalPlanSource.cruise, 0.0)
+      limo.plan(0.0, 0.0, 0.0, 0.0, 0.0, 50.0, False)
+      limo.reset(0.0)
+    assert limo.failed and not limo.enabled
+
+  @parameterized.expand([(np.nan,), (np.inf,)])
+  def test_bad_state_does_not_become_a_target(self, bad):
+    limo = make_limo()
+    limo.outputs[:] = bad
+    limo.disturbance = np.nan
+    assert limo.cruise_target(20.0, LongitudinalPlanSource.cruise, 0.0) is None
+    limo.reset(0.0)
+    assert limo.cruise_target(20.0, LongitudinalPlanSource.cruise, 0.0) is not None
+
+  @parameterized.expand([(3.0, -0.05, -0.4), (6.0, -0.05, -0.05), (3.0, 0.2, 0.2)])
+  def test_stops_rolling_close_to_the_lead(self, distance, a_lead, expected):
+    limo = make_limo()
+    for _ in range(40):
+      limo.start_frame(0.3, 0.0, Personality.standard, True)
+      accel, _ = limo.plan(ACCEL_MAX, a_lead, ACCEL_MAX, a_lead, ACCEL_MAX, distance, False)
+    assert abs(accel - expected) < 1e-3
+
   def test_starts_from_current_accel(self):
     limo = make_limo()
-    limo.reset(-0.8)
-    limo.start_frame(20.0, -0.8, Personality.standard, True)
-    assert abs(limo.update(-0.8, -0.8, None, 2.0, np.inf, False) + 0.8) < 1e-6
+    limo.reset(-0.4)
+    limo.start_frame(20.0, -0.4, Personality.standard, True)
+    assert abs(limo.plan(-0.4, 2.0, 2.0, 2.0, 2.0, np.inf, False)[0] + 0.4) < 1e-6
 
   def test_param(self):
     params = Params()

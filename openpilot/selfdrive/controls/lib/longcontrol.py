@@ -6,7 +6,6 @@ from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
-SOFT_STOP_TIME = 1.0  # s
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
@@ -48,8 +47,6 @@ class LongControl:
     self.pid = PIDController(0.0, (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
-    self.soft_stop = False
-    self.soft_stop_frames = 0
 
   def reset(self):
     self.pid.reset()
@@ -62,9 +59,6 @@ class LongControl:
     self.long_control_state = long_control_state_trans(self.CP_SP, active, self.long_control_state,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
-    if self.long_control_state != LongCtrlState.stopping:
-      self.soft_stop_frames = 0
-
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
@@ -73,11 +67,8 @@ class LongControl:
       output_accel = self.last_output_accel
       if output_accel > self.CP.stopAccel:
         output_accel = min(output_accel, 0.0)
-        # don't tighten the brakes until the car has stopped, unless it doesn't
-        self.soft_stop_frames += 1
-        if not (self.soft_stop and not CS.standstill and self.soft_stop_frames < SOFT_STOP_TIME / DT_CTRL):
-          # TODO: can we just go straight to stopAccel?
-          output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
+        # TODO: can we just go straight to stopAccel?
+        output_accel -= 1.0 * DT_CTRL  # m/s^2/s while trying to stop
       self.reset()
 
     else:  # LongCtrlState.pid
