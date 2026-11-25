@@ -8,7 +8,7 @@ import numpy as np
 
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.test import OpenpilotTestCase
-from openpilot.sunnypilot.modeld_v2.blendful import Blendful
+from openpilot.sunnypilot.modeld_v2.blendful import Blendful, OPPOSE_SHARE, OPPOSE_TURN, limit_opposing
 from openpilot.sunnypilot.modeld_v2.constants import ModelConstants
 
 X = np.array(ModelConstants.X_IDXS)
@@ -110,3 +110,27 @@ class TestBlendful(OpenpilotTestCase):
     assert self.bf.trust == 0.0
     assert abs(out[0]) < abs(start)
     assert abs(out[-1]) < 1e-6
+
+  def test_does_not_cancel_the_models_turn(self):
+    # lane lines say keep right while the model turns left (a lane shift): a nudge at most, never the other way
+    k = 0.005
+    push = drive(self.bf, 6.0, k=k, center=-1.0)
+    assert np.all(push <= 0.0)
+    assert np.all(np.abs(push) <= OPPOSE_SHARE * k * 20.0 ** 2 + 1e-6)
+
+  def test_agreeing_correction_is_untouched(self):
+    k = 0.005
+    push = drive(self.bf, 6.0, k=k, center=0.5)
+    assert push[-1] > 0.02
+
+  def test_limit_opposing(self):
+    assert limit_opposing(0.002, 0.0) == 0.002  # straight: centering as before
+    assert limit_opposing(-0.002, 0.0005) == -0.002
+    assert limit_opposing(0.002, 0.004) == 0.002  # same direction as the turn
+    assert np.isclose(limit_opposing(-0.004, 0.004), -OPPOSE_SHARE * 0.004)
+    assert np.isclose(limit_opposing(0.01, -0.004), OPPOSE_SHARE * 0.004)
+    # continuous through the turn threshold
+    ks = np.linspace(0.0, 0.006, 601)
+    out = np.array([limit_opposing(-0.003, k) for k in ks])
+    assert np.abs(np.diff(out)).max() < 1e-4
+    assert out[ks <= OPPOSE_TURN[0]].min() == -0.003

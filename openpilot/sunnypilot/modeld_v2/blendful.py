@@ -18,7 +18,20 @@ MIN_SPEED = 5.0  # m/s
 LINE_STD = (0.2, 0.6)
 POINT_STD = 0.1
 YIELD = (0.2, 0.45)
+# Correcting against a turn the model is making: across 2.7 h of driving, drivers steered with the model about four times as
+# often as with the correction when it did (lane lines that end at a lane shift, wide sections, ...). Keep it to a nudge
+OPPOSE_SHARE = 0.25  # of the model's curvature
+OPPOSE_TURN = (0.001, 0.003)  # 1/m, model curvature: below the first it is centering on a straight, above the second a turn
 X_IDXS = np.array(ModelConstants.X_IDXS)
+
+
+def limit_opposing(correction: float, model_curvature: float) -> float:
+  """A correction against the model's turn can take away at most OPPOSE_SHARE of it, and never turns the other way"""
+  if correction * model_curvature >= 0.0:
+    return correction
+  turn = abs(model_curvature)
+  cap = float(np.interp(turn, OPPOSE_TURN, [abs(correction), OPPOSE_SHARE * turn]))
+  return float(np.copysign(min(abs(correction), cap), correction))
 
 
 class Blendful:
@@ -52,8 +65,9 @@ class Blendful:
       self.usual_offset.initialized = False
       self.lane_width.initialized = False
       self.going_around = False
-    target = 0.0 if fading else self._target(model_output, v_ego, model_curvature)
-    target = self.smooth = self.smooth + (target - self.smooth) * DT_MDL / (DT_MDL + np.interp(abs(model_curvature) * v_ego ** 2, [0.18, 0.53], [0.5, 0.0]))
+    target = 0.0 if fading else limit_opposing(self._target(model_output, v_ego, model_curvature), model_curvature)
+    target = self.smooth = limit_opposing(self.smooth + (target - self.smooth) * DT_MDL /
+                                          (DT_MDL + np.interp(abs(model_curvature) * v_ego ** 2, [0.18, 0.53], [0.5, 0.0])), model_curvature)
     build = 0.5 / max(v_ego, 1.0) ** 2 * DT_MDL  # jerk over 1 second
     release = (0.5 if fading else 2.0) / max(v_ego, 1.0) ** 2 * DT_MDL  # lets go fast, but past zero it builds like any other pull
     k = self.curvature
