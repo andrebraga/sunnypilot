@@ -44,8 +44,8 @@ sections:
     - $ref: '#/macros/longitudinal'
   - key: StopDistance
     widget: option
-    title: Stop Distance
-    description: "How far behind a stopped car sunnypilot comes to rest, measured to the other car. Stock leaves about 4.5 m, which invites cut-ins. Only applies at a crawl: moving traffic keeps the normal following distance. It only closes in when the car is already crawling and can do it gently: stops that take firm braking end where they would without it."
+    title: Gap in Stopped Traffic
+    description: "How far behind the car ahead sunnypilot comes to rest when it crawls up to stopped traffic. Stock leaves about 4.5 m, which invites cut-ins. It only closes in gently at a crawl: stops that take firm braking, and moving traffic, keep the normal distance."
     options:
     - value: 25
       label: 2.5 m

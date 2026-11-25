@@ -27,11 +27,9 @@ ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently un
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
 
-STOP_DISTANCE_DESCRIPTION = tr_noop("How far behind a stopped car sunnypilot comes to rest, measured to the other car. " +
-                                    "Stock leaves about 4.5 m, which invites cut-ins. Only applies at a crawl: " +
-                                    "moving traffic keeps the normal following distance. " +
-                                    "It only closes in when the car is already crawling and can do it gently: " +
-                                    "stops that take firm braking end where they would without it.")
+STOP_DISTANCE_DESCRIPTION = tr_noop("How far behind the car ahead sunnypilot comes to rest when it crawls up to stopped traffic. " +
+                                    "Stock leaves about 4.5 m, which invites cut-ins. It only closes in gently at a crawl: " +
+                                    "stops that take firm braking, and moving traffic, keep the normal distance.")
 STOP_DISTANCE_VALUES = {0: 25, 1: 30, 2: 35, 3: 40, 4: 0}  # dm, 0 is stock
 
 
@@ -94,7 +92,7 @@ class CruiseLayout(Widget):
     )
 
     self.stop_distance_item = option_item_sp(
-      title=tr("Stop Distance"),
+      title=tr("Gap in Stopped Traffic"),
       description=tr(STOP_DISTANCE_DESCRIPTION),
       param="StopDistance",
       value_map=STOP_DISTANCE_VALUES,
