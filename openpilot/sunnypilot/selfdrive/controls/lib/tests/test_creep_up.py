@@ -10,7 +10,7 @@ import numpy as np
 
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.test import OpenpilotTestCase
-from openpilot.sunnypilot.selfdrive.controls.lib.creep_up import CreepUp, ABORT_DECEL, ACCEL, MAX_EXCESS, SETTLE_TIME, SPEED
+from openpilot.sunnypilot.selfdrive.controls.lib.creep_up import CreepUp, ACCEL, CLOSER_DECEL, FIRM_BRAKE, MAX_EXCESS, SETTLE_TIME, SPEED
 
 GAP = 3.0
 
@@ -96,7 +96,7 @@ class TestCreepUp(OpenpilotTestCase):
     assert c.active and car.v > 0.2
     x0 = car.x
     outs = run(c, car, 3.0, lead_fn=lambda car, t: lead(1.5 - (car.x - x0)))
-    assert outs[0] is not None and outs[0][0] <= ABORT_DECEL
+    assert outs[0] is not None and outs[0][0] <= CLOSER_DECEL
     assert car.v == 0.0 and car.x - x0 < 0.3
 
   def test_stops_when_the_radar_loses_it(self):
@@ -119,3 +119,11 @@ class TestCreepUp(OpenpilotTestCase):
     car.gap0 += 2.0  # the car ahead moved off a little and stopped, we didn't move
     run(c, car, 5.0)
     assert c.done and abs(car.gap - GAP - 2.0) < 0.3
+
+  def test_hands_over_to_braking_without_a_jolt(self):
+    # the model brakes a little while it creeps (it wants its own gap): it stops the car, the creep doesn't add to it
+    c, car = CreepUp(), Car(5.0)
+    run(c, car, SETTLE_TIME + 1.5)
+    assert c.active
+    out = c.update(car.v, False, FIRM_BRAKE - 0.01, lead(car.gap), GAP, True, False, False)
+    assert out is None and c.done and not c.stopping

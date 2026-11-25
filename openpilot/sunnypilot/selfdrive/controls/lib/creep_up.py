@@ -20,7 +20,8 @@ DECEL = 0.4  # m/s^2, it plans to stop at the gap with this
 BRAKE = 1.5  # m/s^2, at most, to hold to that plan (downhill)
 RESPONSE = 0.4  # s, of the car, rolled before braking takes hold
 SPEED_TAU = 0.5  # s
-ABORT_DECEL = -1.0  # m/s^2, stopping when the scene changes
+ABORT_DECEL = -0.6  # m/s^2, stopping when the scene changes and nothing else brakes for it (lead lost, too long)
+CLOSER_DECEL = -1.0  # m/s^2, something stepped in between
 FIRM_BRAKE = -0.3  # m/s^2, anything braking harder than this wins over it
 LEAD_STILL = 0.3  # m/s, the car ahead stands
 LEAD_JUMP = 0.5  # m, the car ahead coming closer than it can by us rolling: something else is there
@@ -34,6 +35,7 @@ class CreepUp:
     self.standing = 0.0
     self.active = False
     self.stopping = False
+    self.decel = ABORT_DECEL
     self.done = False
     self.time = 0.0
     self.travelled = 0.0
@@ -46,7 +48,7 @@ class CreepUp:
   def lead_ok(lead) -> bool:
     return bool(lead.present and lead.radar and lead.modelProb > MODEL_PROB and abs(lead.vLead) < LEAD_STILL)
 
-  def abort(self, v_ego: float, a_target: float, lead) -> tuple[float, bool] | None:
+  def abort(self, v_ego: float, a_target: float, lead, decel: float = ABORT_DECEL) -> tuple[float, bool] | None:
     self.active = False
     if lead.present and lead.vLead > LEAD_STILL and not self.stopping:  # the queue moves: follow it like any other time
       self.done = True
@@ -55,7 +57,8 @@ class CreepUp:
       self.stopping, self.done = False, True
       return None
     self.stopping = True
-    return min(a_target, ABORT_DECEL), v_ego < 0.3
+    self.decel = decel
+    return min(a_target, self.decel), v_ego < 0.3
 
   def update(self, v_ego: float, standstill: bool, a_target: float, lead, gap: float, enabled: bool, fcw: bool,
              pedal: bool) -> tuple[float, bool] | None:
@@ -69,7 +72,7 @@ class CreepUp:
       self.reset()
       return None
     if self.stopping:
-      return self.abort(v_ego, a_target, lead)
+      return self.abort(v_ego, a_target, lead, self.decel)
     if not np.isfinite(gap):
       self.reset()
       return None
@@ -90,7 +93,12 @@ class CreepUp:
     self.time += self.dt
     self.travelled += max(v_ego, 0.0) * self.dt
     something_closer = lead.present and lead.dRel < self.start_gap - self.travelled - LEAD_JUMP
-    if not self.lead_ok(lead) or something_closer or a_target < FIRM_BRAKE or self.time > MAX_TIME or v_ego > 2.0 * SPEED:
+    if something_closer:
+      return self.abort(v_ego, a_target, lead, CLOSER_DECEL)
+    if a_target < FIRM_BRAKE:  # the model or the lead plan brakes: they stop the car, as gently as they ask
+      self.active, self.done = False, True
+      return None
+    if not self.lead_ok(lead) or self.time > MAX_TIME or v_ego > 2.0 * SPEED:
       return self.abort(v_ego, a_target, lead)
 
     excess = float(lead.dRel - gap) - v_ego * RESPONSE
