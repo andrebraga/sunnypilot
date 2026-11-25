@@ -52,6 +52,9 @@ CREEP_ACCEL = (0.1, -0.05)  # m/s^2, when the lead plan doesn't want to go
 CREEP_SPEED = (0.02, 0.2)  # m/s
 CREEP_DECEL = 0.4  # m/s^2
 
+# Stops behind a lead end 4-6 m from it. The chauffeur stop rolls a few cm further than the stock squeeze, not this close
+SOFT_STOP_LEAD_DISTANCE = 3.0  # m
+
 # The part of the car's response that isn't from the commands. Cars that hold the commanded accel on hills have little
 DISTURBANCE_TAU = 1.5  # s
 DISTURBANCE_MAX = 0.4  # m/s^2
@@ -66,6 +69,12 @@ def clip(x: float, low: float, high: float) -> float:
 def smoothstep(x: float, start: float, end: float) -> float:
   t = clip((x - start) / (end - start), 0.0, 1.0)
   return t * t * (3.0 - 2.0 * t)
+
+
+def soft_stop_allowed(leads, fcw: bool) -> bool:
+  """The chauffeur stop leaves the brakes lighter in the last bit of a stop, not near a lead or in an emergency"""
+  lead_distance = min((lead.dRel for lead in leads if lead.present), default=np.inf)
+  return bool(not fcw and lead_distance > SOFT_STOP_LEAD_DISTANCE)
 
 
 def fail_safe(default):
