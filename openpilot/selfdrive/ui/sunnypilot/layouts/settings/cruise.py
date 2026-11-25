@@ -27,9 +27,10 @@ ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently un
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
 
-STOP_DISTANCE_DESCRIPTION = tr_noop("How far behind the car ahead sunnypilot comes to rest when it crawls up to stopped traffic. " +
-                                    "Stock leaves about 4.5 m, which invites cut-ins. It only closes in gently at a crawl: " +
-                                    "stops that take firm braking, and moving traffic, keep the normal distance.")
+STOP_DISTANCE_DESCRIPTION = tr_noop("How far behind the car ahead sunnypilot comes to rest in stopped traffic. " +
+                                    "Stock leaves about 4.5 m, which invites cut-ins. It closes in gently at a crawl, and if a stop " +
+                                    "still ends up to 2.5 m further back, it creeps up at walking pace once the car ahead has stood for " +
+                                    "a moment and radar and camera both see it. Any braking, a pedal or something stepping in stops it.")
 STOP_DISTANCE_VALUES = {0: 25, 1: 30, 2: 35, 3: 40, 4: 0}  # dm, 0 is stock
 
 

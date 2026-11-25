@@ -221,6 +221,7 @@ class LongitudinalMpc:
     self.dt = dt
     self.stop_distance = STOP_DISTANCE
     self.stop_shift = 0.0
+    self.close_in = True  # standing still, only a creep up (that checks the scene first) may close the gap
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = LongitudinalPlanSource.cruise
@@ -354,7 +355,7 @@ class LongitudinalMpc:
     x_obstacle: where the closest lead would stop, now
     """
     shift = STOP_DISTANCE - self.stop_distance
-    if not shift > 0.0 or not np.isfinite(shift):
+    if not shift > 0.0 or not np.isfinite(shift) or not self.close_in:
       self.stop_shift = 0.0
       return 0.0
     v_ego = max(float(self.x0[1]), 0.0)

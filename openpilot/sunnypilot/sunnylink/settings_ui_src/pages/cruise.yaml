@@ -45,7 +45,7 @@ sections:
   - key: StopDistance
     widget: option
     title: Gap in Stopped Traffic
-    description: "How far behind the car ahead sunnypilot comes to rest when it crawls up to stopped traffic. Stock leaves about 4.5 m, which invites cut-ins. It only closes in gently at a crawl: stops that take firm braking, and moving traffic, keep the normal distance."
+    description: "How far behind the car ahead sunnypilot comes to rest in stopped traffic. Stock leaves about 4.5 m, which invites cut-ins. It closes in gently at a crawl, and if a stop still ends up to 2.5 m further back, it creeps up at walking pace once the car ahead has stood for a moment and radar and camera both see it. Any braking, a pedal or something stepping in stops it."
     options:
     - value: 25
       label: 2.5 m

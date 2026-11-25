@@ -62,6 +62,17 @@ class TestStopDistance(OpenpilotTestCase):
     for bad in (np.nan, -np.inf):
       assert mpc.stop_distance_shift(bad) == 0.0
 
+  def test_not_standing_still(self):
+    # standing behind a car only the creep up may close the gap: the lead plan keeps the stock distance
+    mpc = LongitudinalMpc()
+    mpc.stop_distance = 3.0
+    mpc.set_cur_state(0.0, 0.0)
+    for _ in range(50):
+      mpc.stop_distance_shift(10.0)
+    assert mpc.stop_shift > 0.0
+    mpc.close_in = False
+    assert mpc.stop_distance_shift(10.0) == 0.0
+
   def test_closes_in_slowly_opens_at_once(self):
     mpc = LongitudinalMpc()
     mpc.stop_distance = 4.0

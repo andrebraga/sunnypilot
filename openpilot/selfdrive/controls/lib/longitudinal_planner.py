@@ -9,13 +9,14 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan, should_stop
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.sunnypilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlannerSP
+from openpilot.sunnypilot.selfdrive.controls.lib.creep_up import CreepUp
 
 J_CRUISE_VALS = [1.6, 1.2, 0.8, 0.6]
 J_CRUISE_BP = [0., 10.0, 25., 40.]
@@ -44,6 +45,8 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     self.accel_boost = AccelBoost()
     # Limo mode: a smoother lead plan with more room. It can only add braking to the lead plan, never take it away
     self.mpc_anticipation = LongitudinalMpc(dt=dt)
+    self.creep_up = CreepUp(dt)
+    self.creep_up_failed = False
     self.anticipating = False
     self.anticipation_failed = False
 
@@ -98,6 +101,7 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
     v_cruise, self.output_a_target = LongitudinalPlannerSP.update_targets(self, sm, self.v_desired_filter.x, self.output_a_target, v_cruise)
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
+    self.mpc.close_in = self.mpc_anticipation.close_in = not sm['carState'].standstill or self.creep_up.active
     if self.CP.openpilotLongitudinalControl:
       self.mpc.set_cur_state(self.v_desired_filter.x, self.output_a_target)
     else:
@@ -156,8 +160,24 @@ class LongitudinalPlanner(LongitudinalPlannerSP):
       if limo_a_target is not None:
         output_a_target = limo_a_target
     self.output_a_target = np.clip(output_a_target, ACCEL_MIN, ACCEL_MAX)
+    self.update_creep_up(sm, v_ego, reset_state)
 
     self.v_desired_filter.x = self.v_desired_filter.x + self.dt * (self.output_a_target + a_prev) / 2.0
+
+  def update_creep_up(self, sm, v_ego: float, reset_state: bool) -> None:
+    if self.creep_up_failed:
+      return
+    try:
+      CS = sm['carState']
+      gap = self.mpc.stop_distance if self.mpc.stop_distance < STOP_DISTANCE else np.nan
+      creep = self.creep_up.update(v_ego, CS.standstill, float(self.output_a_target), sm['radarState'].leadOne, gap,
+                                   not reset_state, self.fcw, CS.gasPressed or CS.brakePressed)
+      if creep is not None:
+        self.output_a_target = float(np.clip(creep[0], ACCEL_MIN, ACCEL_MAX))
+        self.output_should_stop = creep[1]
+    except Exception:
+      cloudlog.exception("creep up failed, off until restart")
+      self.creep_up_failed = True
 
   def update_anticipation(self, sm, limo_active: bool, prev_accel_constraint: bool) -> None:
     curve = self.limo.curve
