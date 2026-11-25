@@ -8,6 +8,11 @@ See the LICENSE.md file in the root directory for more details.
 from openpilot.cereal import messaging, custom
 from opendbc.car import structs
 from openpilot.common.constants import CV
+from openpilot.common.params import Params
+from openpilot.common.realtime import DT_MDL
+from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import STOP_DISTANCE
+from openpilot.sunnypilot import PARAMS_UPDATE_PERIOD
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX
 from openpilot.selfdrive.controls.lib.accel_boost import AccelBoost
 from openpilot.sunnypilot.selfdrive.controls.lib.accel_boost import AccelBoostSP
@@ -20,6 +25,21 @@ from openpilot.sunnypilot.selfdrive.selfdrived.events import EventsSP
 from openpilot.sunnypilot.models.helpers import get_active_bundle
 
 LongitudinalPlanSource = custom.LongitudinalPlanSP.LongitudinalPlanSource
+
+# StopDistance: the gap to a stopped lead, in dm, 0 for stock. Stops end this much short of the planner's stop distance
+STOP_DISTANCE_PARAM = "StopDistance"
+STOP_GAP_MARGIN = 0.0  # m
+STOP_GAP_MIN = 2.0  # m
+
+
+def stop_distance_from_param(value) -> float:
+  try:
+    gap = float(value) / 10.0
+  except (TypeError, ValueError):
+    return STOP_DISTANCE
+  if not gap > 0.0:
+    return STOP_DISTANCE
+  return min(max(gap, STOP_GAP_MIN) + STOP_GAP_MARGIN, STOP_DISTANCE)
 
 
 class LongitudinalPlannerSP:
@@ -40,6 +60,10 @@ class LongitudinalPlannerSP:
 
     self.output_v_target = 0.
     self.output_a_target = 0.
+
+    self.params = Params()
+    self.stop_distance = STOP_DISTANCE
+    self.stop_distance_frame = -1
 
   def update_targets(self, sm: messaging.SubMaster, v_ego: float, a_ego: float, v_cruise: float) -> tuple[float, float]:
     CS = sm['carState']
@@ -76,9 +100,24 @@ class LongitudinalPlannerSP:
       self.accel_boost = self.accel_boost_sp if self.accel_boost_sp.enabled and self.openpilot_longitudinal else AccelBoost()
 
     self.limo.update_params()
+    self.update_stop_distance()
 
     self.events_sp.clear()
     self.e2e_alerts_helper.update(sm, self.events_sp)
+
+  def update_stop_distance(self) -> None:
+    self.stop_distance_frame += 1
+    if self.stop_distance_frame % int(PARAMS_UPDATE_PERIOD / DT_MDL) == 0:
+      try:
+        value = self.params.get(STOP_DISTANCE_PARAM) if self.openpilot_longitudinal else None
+        self.stop_distance = stop_distance_from_param(value)
+      except Exception:
+        cloudlog.exception("StopDistance unreadable, stock")
+        self.stop_distance = STOP_DISTANCE
+    for mpc in (getattr(self, 'mpc', None), getattr(self, 'mpc_anticipation', None)):
+      if mpc is not None:
+        mpc.stop_distance = self.stop_distance
+    self.limo.stop_distance_shift = STOP_DISTANCE - self.stop_distance
 
   def publish_longitudinal_plan_sp(self, sm: messaging.SubMaster, pm: messaging.PubMaster) -> None:
     plan_sp_send = messaging.new_message('longitudinalPlanSP')

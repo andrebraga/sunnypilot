@@ -55,6 +55,11 @@ FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 COMFORT_BRAKE = 2.5
 STOP_DISTANCE = 6.0
+# A closer stop distance (sunnypilot StopDistance) only once the car crawls and nothing needs real braking. Braking
+# for a stop, moving traffic and emergencies all keep STOP_DISTANCE as their margin
+CLOSE_STOP_SPEED = (1.5, 3.0)  # m/s, now, all of it below, none above
+CLOSE_STOP_DECEL = (0.5, 1.0)  # m/s^2, braking it takes to stop at the closer distance, all of it below, none above
+CLOSE_STOP_RATE = 1.0  # m/s, how quickly the gap closes in. it opens up at once
 MIN_X_LEAD_FACTOR = 0.5
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
@@ -214,6 +219,8 @@ def gen_long_ocp():
 class LongitudinalMpc:
   def __init__(self, dt=DT_MDL):
     self.dt = dt
+    self.stop_distance = STOP_DISTANCE
+    self.stop_shift = 0.0
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = LongitudinalPlanSource.cruise
@@ -329,7 +336,7 @@ class LongitudinalMpc:
 
     self.params[:,0] = ACCEL_MIN
     self.params[:,1] = ACCEL_MAX
-    self.params[:,2] = np.min(x_obstacles, axis=1)
+    self.params[:,2] = np.min(x_obstacles, axis=1) + self.stop_distance_shift(float(np.min(x_obstacles[0])))
     self.params[:,3] = np.copy(self.a_prev)
     self.params[:,4] = t_follow
     self.params[:,5] = LEAD_DANGER_FACTOR
@@ -340,6 +347,24 @@ class LongitudinalMpc:
       self.crash_cnt += 1
     else:
       self.crash_cnt = 0
+
+  def stop_distance_shift(self, x_obstacle):
+    """How much further the obstacle is moved to stop closer than STOP_DISTANCE
+
+    x_obstacle: where the closest lead would stop, now
+    """
+    shift = STOP_DISTANCE - self.stop_distance
+    if not shift > 0.0 or not np.isfinite(shift):
+      self.stop_shift = 0.0
+      return 0.0
+    v_ego = max(float(self.x0[1]), 0.0)
+    room = x_obstacle - self.stop_distance
+    decel = v_ego ** 2 / (2.0 * room) if room > 0.0 else np.inf
+    if not np.isfinite(decel):
+      decel = np.inf
+    target = shift * float(np.interp(v_ego, CLOSE_STOP_SPEED, [1.0, 0.0])) * float(np.interp(decel, CLOSE_STOP_DECEL, [1.0, 0.0]))
+    self.stop_shift = min(target, self.stop_shift + CLOSE_STOP_RATE * self.dt)
+    return self.stop_shift
 
   def run(self):
     for i in range(N+1):

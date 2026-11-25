@@ -5,7 +5,6 @@ import numpy as np
 from openpilot.common.realtime import DT_CTRL
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl, LongCtrlState, SOFT_STOP_FLOOR, SOFT_STOP_SETTLE, SOFT_STOP_TIME
-from openpilot.sunnypilot.selfdrive.controls.lib.limo_mode import SOFT_STOP_LEAD_DISTANCE, soft_stop_allowed
 
 LIMITS = (-3.5, 2.0)
 
@@ -100,12 +99,3 @@ class TestSoftStop(OpenpilotTestCase):
     for _ in range(100):
       u = lc.update(True, state(0.05, standstill=False), 0.0, True, LIMITS, soft_stop=True)
     assert abs(u + SOFT_STOP_FLOOR) < 1e-6, u
-
-  def test_allowed(self):
-    def lead(d, p=True):
-      return SimpleNamespace(present=p, dRel=d)
-    assert soft_stop_allowed((lead(0.0, False), lead(0.0, False)), False)
-    assert soft_stop_allowed((lead(SOFT_STOP_LEAD_DISTANCE + 1.0),), False)
-    assert not soft_stop_allowed((lead(SOFT_STOP_LEAD_DISTANCE - 0.1),), False)
-    assert not soft_stop_allowed((lead(50.0), lead(2.0)), False)
-    assert not soft_stop_allowed((lead(50.0),), True)

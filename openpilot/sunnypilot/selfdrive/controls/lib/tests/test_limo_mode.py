@@ -288,6 +288,19 @@ class TestLimoMode(OpenpilotTestCase):
       accel, _ = limo.plan(ACCEL_MAX, a_lead, ACCEL_MAX, a_lead, ACCEL_MAX, distance, False)
     assert abs(accel - expected) < 1e-3
 
+  def test_creep_guard_follows_the_stop_distance(self):
+    # with stops 2 m closer, 3 m from the lead is where a stop should end, not creeping
+    limo = make_limo()
+    limo.stop_distance_shift = 2.0
+    for _ in range(40):
+      limo.start_frame(0.3, 0.0, Personality.standard, True)
+      accel, _ = limo.plan(ACCEL_MAX, -0.05, ACCEL_MAX, -0.05, ACCEL_MAX, 3.0, False)
+    assert abs(accel + 0.05) < 1e-3
+    for _ in range(40):
+      limo.start_frame(0.3, 0.0, Personality.standard, True)
+      accel, _ = limo.plan(ACCEL_MAX, -0.05, ACCEL_MAX, -0.05, ACCEL_MAX, 1.0, False)
+    assert abs(accel + 0.4) < 1e-3
+
   def test_starts_from_current_accel(self):
     limo = make_limo()
     limo.reset(-0.4)

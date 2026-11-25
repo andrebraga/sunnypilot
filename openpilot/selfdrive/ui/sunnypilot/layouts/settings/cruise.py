@@ -27,6 +27,18 @@ ICMB_UNAVAILABLE = tr_noop("Intelligent Cruise Button Management is currently un
 ICMB_UNAVAILABLE_LONG_AVAILABLE = tr_noop("Disable the sunnypilot Longitudinal Control (alpha) toggle to allow Intelligent Cruise Button Management.")
 ICMB_UNAVAILABLE_LONG_UNAVAILABLE = tr_noop("sunnypilot Longitudinal Control is the default longitudinal control for this platform.")
 
+STOP_DISTANCE_DESCRIPTION = tr_noop("How far behind a stopped car sunnypilot comes to rest, measured to the other car. " +
+                                    "Stock leaves about 4.5 m, which invites cut-ins. Only applies at a crawl: " +
+                                    "moving traffic keeps the normal following distance. " +
+                                    "It only closes in when the car is already crawling and can do it gently: " +
+                                    "stops that take firm braking end where they would without it.")
+STOP_DISTANCE_VALUES = {0: 25, 1: 30, 2: 35, 3: 40, 4: 0}  # dm, 0 is stock
+
+
+def stop_distance_label(value: int) -> str:
+  return tr("Stock") if value == 0 else f"{value / 10:.1f} m"
+
+
 ACC_ENABLED_DESCRIPTION = tr_noop("Enable custom Short & Long press increments for cruise speed increase/decrease.")
 ACC_NOLONG_DESCRIPTION = tr_noop("This feature can only be used with sunnypilot longitudinal control enabled.")
 ACC_PCMCRUISE_DISABLED_DESCRIPTION = tr_noop("This feature is not supported on this platform due to vehicle limitations.")
@@ -81,6 +93,14 @@ class CruiseLayout(Widget):
       callback=lambda: self._set_current_panel(PanelType.LIMO)
     )
 
+    self.stop_distance_item = option_item_sp(
+      title=tr("Stop Distance"),
+      description=tr(STOP_DISTANCE_DESCRIPTION),
+      param="StopDistance",
+      value_map=STOP_DISTANCE_VALUES,
+      min_value=0, max_value=len(STOP_DISTANCE_VALUES) - 1, value_change_step=1,
+      label_callback=stop_distance_label)
+
     self.custom_acc_toggle = toggle_item_sp(
       title=tr("Custom ACC Speed Increments"),
       description="",
@@ -113,6 +133,7 @@ class CruiseLayout(Widget):
       self.accel_boost_toggle,
       self.limo_mode_toggle,
       self.limo_curve_button,
+      self.stop_distance_item,
       self.custom_acc_toggle,
       self.custom_acc_short_increment,
       self.custom_acc_long_increment,
@@ -177,6 +198,7 @@ class CruiseLayout(Widget):
       self.accel_boost_toggle.action_item.set_enabled(has_long)
       self.limo_mode_toggle.action_item.set_enabled(has_long)
       self.limo_curve_button.action_item.set_enabled(has_long)
+      self.stop_distance_item.action_item.set_enabled(has_long)
 
       if has_long or has_icbm:
         self.custom_acc_toggle.action_item.set_enabled(((has_long and not ui_state.CP.pcmCruise) or has_icbm) and ui_state.is_offroad())
@@ -196,6 +218,7 @@ class CruiseLayout(Widget):
       self.accel_boost_toggle.action_item.set_enabled(False)
       self.limo_mode_toggle.action_item.set_enabled(False)
       self.limo_curve_button.action_item.set_enabled(False)
+      self.stop_distance_item.action_item.set_enabled(False)
       self.icbm_toggle.set_description(tr(ONROAD_ONLY_DESCRIPTION))
 
     show_custom_acc_desc = False

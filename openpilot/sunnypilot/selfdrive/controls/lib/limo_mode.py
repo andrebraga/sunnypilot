@@ -47,13 +47,10 @@ CRAWL_SPEED = (4.0, 2.0)  # m/s, stick to the lead and model targets to pull awa
 MODEL_LOOKAHEAD_DECEL = 0.5  # m/s^2, how much earlier braking to take from the model's plan
 
 # Don't keep rolling towards a close lead with the brakes barely on
-CREEP_DISTANCE = (4.5, 3.5)  # m, closer than where a stop should end
+CREEP_DISTANCE = (4.5, 3.5)  # m, closer than where a stop should end, with the stock stop distance
 CREEP_ACCEL = (0.1, -0.05)  # m/s^2, when the lead plan doesn't want to go
 CREEP_SPEED = (0.02, 0.2)  # m/s
 CREEP_DECEL = 0.4  # m/s^2
-
-# Stops behind a lead end 4-6 m from it. The chauffeur stop rolls a few cm further than the stock squeeze, not this close
-SOFT_STOP_LEAD_DISTANCE = 3.0  # m
 
 # The part of the car's response that isn't from the commands. Cars that hold the commanded accel on hills have little
 DISTURBANCE_TAU = 1.5  # s
@@ -69,12 +66,6 @@ def clip(x: float, low: float, high: float) -> float:
 def smoothstep(x: float, start: float, end: float) -> float:
   t = clip((x - start) / (end - start), 0.0, 1.0)
   return t * t * (3.0 - 2.0 * t)
-
-
-def soft_stop_allowed(leads, fcw: bool) -> bool:
-  """The chauffeur stop leaves the brakes lighter in the last bit of a stop, not near a lead or in an emergency"""
-  lead_distance = min((lead.dRel for lead in leads if lead.present), default=np.inf)
-  return bool(not fcw and lead_distance > SOFT_STOP_LEAD_DISTANCE)
 
 
 def fail_safe(default):
@@ -165,6 +156,7 @@ class LimoMode:
     self.v_ego = 0.0
     self.disturbance = 0.0
     self.vision_time = 0.0
+    self.stop_distance_shift = 0.0  # m, how much closer than stock stops end (StopDistance)
 
   @fail_safe(None)
   def update_params(self) -> None:
@@ -322,7 +314,8 @@ class LimoMode:
 
     has_lead = np.isfinite(lead_distance)
     if has_lead:
-      creeping = crawling * smoothstep(lead_distance, *CREEP_DISTANCE) * smoothstep(a_lead, *CREEP_ACCEL) * smoothstep(self.v_ego, *CREEP_SPEED)
+      close = smoothstep(lead_distance + self.stop_distance_shift, *CREEP_DISTANCE)
+      creeping = crawling * close * smoothstep(a_lead, *CREEP_ACCEL) * smoothstep(self.v_ego, *CREEP_SPEED)
       output += creeping * min(-CREEP_DECEL - output, 0.0)
 
     # last, so that nothing above can get past it

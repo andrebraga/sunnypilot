@@ -67,7 +67,7 @@ class LongControl:
   def update(self, active, CS, a_target, should_stop, accel_limits, soft_stop=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop
 
-    soft_stop: the chauffeur stop may be used (Limo mode on, no FCW, no lead close)
+    soft_stop: the chauffeur stop may be used (Limo mode on, no FCW)
     """
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]

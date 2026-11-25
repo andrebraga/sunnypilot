@@ -647,6 +647,41 @@
               ]
             },
             {
+              "key": "StopDistance",
+              "widget": "option",
+              "title": "Stop Distance",
+              "description": "How far behind a stopped car sunnypilot comes to rest, measured to the other car. Stock leaves about 4.5 m, which invites cut-ins. Only applies at a crawl: moving traffic keeps the normal following distance. It only closes in when the car is already crawling and can do it gently: stops that take firm braking end where they would without it.",
+              "options": [
+                {
+                  "value": 25,
+                  "label": "2.5 m"
+                },
+                {
+                  "value": 30,
+                  "label": "3.0 m"
+                },
+                {
+                  "value": 35,
+                  "label": "3.5 m"
+                },
+                {
+                  "value": 40,
+                  "label": "4.0 m"
+                },
+                {
+                  "value": 0,
+                  "label": "Stock"
+                }
+              ],
+              "enablement": [
+                {
+                  "type": "capability",
+                  "field": "has_longitudinal_control",
+                  "equals": true
+                }
+              ]
+            },
+            {
               "key": "IntelligentCruiseButtonManagement",
               "widget": "toggle",
               "title": "Intelligent Cruise Button Management (ICBM) (Alpha)",
